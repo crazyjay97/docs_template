@@ -1,0 +1,7 @@
+WARNING: 配置覆盖中包含未知的配置项 'docs_to_build'，已忽略
+WARNING: 配置覆盖中包含未知的配置项 'config_dir'，已忽略
+WARNING: 配置覆盖中包含未知的配置项 'doxyfile_dir'，已忽略
+WARNING: 配置覆盖中包含未知的配置项 'project_path'，已忽略
+404.rst:: WARNING: 无法读取图像文件：../../_static/404-page__cn.svg
+about.rst:line: WARNING: 无法读取图像文件：../../_static/about-doc.png
+languages.rst:line: WARNING: 无法读取图像文件：../../_static/choose_language.png
