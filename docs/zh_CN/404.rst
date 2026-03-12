@@ -11,7 +11,7 @@
 
 请使用左侧菜单浏览文档内容。您也可以在菜单上方的搜索框中输入您要查找的内容并按回车键搜索。
 
-.. figure:: ../../_static/404-page__cn.svg
+.. figure:: ../_static/404-page__cn.svg
     :align: center
     :alt: 很抱歉，未找到您请求的页面。
     :figclass: align-center

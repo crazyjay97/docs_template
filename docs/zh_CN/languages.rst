@@ -10,7 +10,7 @@
 
 您可以通过点击每个文档顶部语言链接轻松切换语言。
 
-.. image:: ../../_static/choose_language.png
+.. image:: ../_static/choose_language.png
 
 切换语言步骤：
 

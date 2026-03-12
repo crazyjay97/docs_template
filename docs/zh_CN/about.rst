@@ -5,7 +5,7 @@
 
 这里是 **您的项目** 的文档，用于开发目标平台应用程序的框架。
 
-.. figure:: ../../_static/about-doc.png
+.. figure:: ../_static/about-doc.png
     :align: center
     :alt: 您的项目集成开发框架
     :figclass: align-center

@@ -11,7 +11,7 @@ Page Not Found
 
 Please use the menu on the left to navigate through documentation contents. Optionally type the phrase you are looking for in the search box above the menu and press enter.
 
-.. figure:: ../../_static/404-page__en.svg
+.. figure:: ../_static/404-page__en.svg
     :align: center
     :alt: We are sorry. The page you requested could not be found.
     :figclass: align-center

@@ -5,7 +5,7 @@ About
 
 This is documentation of **Your Project**, the framework to develop applications for your target platform.
 
-.. figure:: ../../_static/about-doc.png
+.. figure:: ../_static/about-doc.png
     :align: center
     :alt: Your Project Integrated Development Framework
     :figclass: align-center
