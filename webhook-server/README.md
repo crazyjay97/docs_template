@@ -1,71 +1,78 @@
 # Webhook Server
 
-GitHub Webhook 服务器，用于文档自动部署。
+GitHub Webhook server for automated documentation deployment.
 
-## 功能特性
+## Features
 
-- **安全验证**
-  - HMAC SHA256 签名验证 (WEBHOOK_SECRET)
-  - GitHub 官方 IP 段验证
-  - 组织/仓库白名单验证
-- **自动部署**：监听 `push` 事件，自动触发部署脚本
-- **日志记录**：记录部署历史，可通过 API 查询
-- **健康检查**：提供 `/health` 健康检查端点
+- **Security Verification**
+  - HMAC SHA256 signature verification (WEBHOOK_SECRET)
+  - GitHub official IP range verification
+  - Organization/user whitelist verification
+- **Auto Deployment**: Listens to `push` events and automatically:
+  - Clones or pulls the repository
+  - Installs pip dependencies from `docs/requirements.txt`
+  - Runs `make dist` in the `docs/` folder
+  - Copies the `dist/` output to the deployment directory
+- **Logging**: Records deployment history, queryable via API
+- **Health Check**: Provides `/health` endpoint for health monitoring
 
-## 快速开始
+## Quick Start
 
-### 1. 编译
+### 1. Build
 
 ```bash
 cd webhook-server
 cargo build --release
 ```
 
-编译产物位置：`target/release/webhook-server`
+Build artifact location: `target/release/webhook-server`
 
-### 2. 配置环境变量
+> **Note**: This project uses `rustls` (pure Rust TLS implementation), no OpenSSL dependency.
 
-创建 `.env` 文件或通过 systemd 配置：
+### 2. Configure Environment Variables
+
+Create a `.env` file or configure via systemd:
 
 ```bash
-# 必需配置
-WEBHOOK_SECRET=your_webhook_secret_here    # GitHub Webhook 密钥
-DEPLOY_SCRIPT=/opt/webhook-server/deploy.sh  # 部署脚本路径
+# Required configuration
+WEBHOOK_SECRET=your_webhook_secret_here    # GitHub Webhook secret key
 
-# 可选配置
-PORT=5000                              # 服务监听端口 (默认：5000)
-REPO_DIR=/var/www/docs-source          # 源码目录
-DEPLOY_DIR=/var/www/docs               # 部署目标目录
-LOG_FILE=/var/log/webhook-deploy.log   # 日志文件路径
-ALLOWED_ORGS=your-org                  # 允许的组织白名单 (逗号分隔)
-ALLOWED_USERS=your-username            # 允许的个人用户白名单 (逗号分隔)
-SKIP_IP_CHECK=false                    # 是否跳过 IP 检查 (默认：false)
+# Directory configuration
+SOURCE_DIR=/var/www/docs-source            # Directory to clone repositories (default: /var/www/docs-source)
+DEPLOY_DIR=/var/www/docs                   # Directory to deploy dist output (default: /var/www/docs)
+
+# Optional configuration
+PORT=5000                              # Service listen port (default: 5000)
+ALLOWED_ORGS=your-org                  # Allowed organization whitelist (comma-separated)
+ALLOWED_USERS=your-username            # Allowed user whitelist (comma-separated)
+SKIP_IP_CHECK=false                    # Whether to skip IP check (default: false)
 ```
 
-### 3. 运行
+### 3. Run
 
-#### 方式一：直接运行
+#### Option 1: Direct execution
 
 ```bash
 ./target/release/webhook-server
 ```
 
-#### 方式二：使用 systemd 服务
+#### Option 2: Using systemd service
 
-1. 复制服务文件到 systemd 目录：
+1. Copy service file to systemd directory:
 
 ```bash
 sudo cp webhook-server.service /etc/systemd/system/
 ```
 
-2. 编辑 `/etc/systemd/system/webhook-server.service`，修改 `Environment` 变量：
+2. Edit `/etc/systemd/system/webhook-server.service`, modify `Environment` variables:
 
 ```ini
 Environment="WEBHOOK_SECRET=your_actual_secret"
-Environment="DEPLOY_SCRIPT=/path/to/your/deploy.sh"
+Environment="SOURCE_DIR=/var/www/docs-source"
+Environment="DEPLOY_DIR=/var/www/docs"
 ```
 
-3. 启动服务：
+3. Start service:
 
 ```bash
 sudo systemctl daemon-reload
@@ -74,85 +81,162 @@ sudo systemctl start webhook-server
 sudo systemctl status webhook-server
 ```
 
-## API 端点
+## API Endpoints
 
-| 端点 | 方法 | 描述 |
-|------|------|------|
-| `/webhook` | POST | GitHub Webhook 接收端点 |
-| `/health` | GET | 健康检查 |
-| `/logs` | GET | 获取部署日志 |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/webhook` | POST | GitHub Webhook receiver endpoint |
+| `/health` | GET | Health check |
+| `/logs` | GET | Get deployment logs |
 
-## GitHub Webhook 配置
+## Deployment Flow
 
-1. 进入仓库的 **Settings** > **Webhooks** > **Add webhook**
+When a webhook is received for a `push` event to `main` or `master` branch:
 
-2. 配置如下：
-   - **Payload URL**: `http://your-server-ip:5000/webhook`
-   - **Content type**: `application/json`
-   - **Secret**: 与 `WEBHOOK_SECRET` 相同的值
-   - **Events**: 选择 **Push events**
+1. **Clone/Pull**:
+   - If repository doesn't exist: `git clone https://github.com/owner/repo.git` to `SOURCE_DIR/repo`
+   - If repository exists: `git pull` to get latest changes
 
-3. 添加后，GitHub 会发送 ping 事件测试连接
+2. **Find docs folder**: Look for `docs/` directory in the cloned repository
 
-## 部署脚本示例
+3. **Install dependencies**: If `docs/requirements.txt` exists, run `pip install -r requirements.txt`
 
-创建 `deploy.sh`：
+4. **Build documentation**: Run `make dist` in the `docs/` directory
 
-```bash
-#!/bin/bash
-set -e
+5. **Deploy**: Copy contents of `docs/dist/` to `DEPLOY_DIR/repo`
 
-echo "Starting deployment..."
+## Directory Structure
 
-# 进入源码目录
-cd /var/www/docs-source
+After deployment, the directory structure will be:
 
-# 拉取最新代码
-git pull origin main
+```
+/var/www/docs-source/          # SOURCE_DIR
+├── repo-a/                    # Cloned repository
+│   ├── docs/
+│   └── ...
 
-# 构建文档
-cd docs
-make build
-
-# 复制到部署目录
-sudo cp -r _build/html/* /var/www/docs/
-
-echo "Deployment completed!"
+/var/www/docs/                 # DEPLOY_DIR
+├── repo-a/                    # Deployed dist contents
+│   ├── index.html
+│   └── ...
 ```
 
-赋予执行权限：
+## Security Recommendations
+
+1. **Always set WEBHOOK_SECRET**: Prevents unauthorized requests
+2. **Configure whitelist**: Restrict organizations/users that can trigger deployment
+3. **Keep IP check enabled**: Ensures requests come from GitHub
+4. **Use HTTPS**: Use reverse proxy (e.g., Nginx) with HTTPS in production
+
+## Nginx Reverse Proxy Configuration
+
+### 1. Install Nginx
 
 ```bash
-chmod +x deploy.sh
+# Ubuntu/Debian
+sudo apt update && sudo apt install nginx
+
+# CentOS/RHEL
+sudo yum install nginx
 ```
 
-## 安全建议
+### 2. Configure Nginx
 
-1. **始终设置 WEBHOOK_SECRET**：防止未授权请求
-2. **配置白名单**：限制允许触发的组织/个人用户
-3. **保持 IP 检查启用**：确保请求来自 GitHub
-4. **使用 HTTPS**：生产环境建议使用反向代理 (如 Nginx) 启用 HTTPS
+Create Nginx configuration file `/etc/nginx/sites-available/webhook-server`:
 
-## 日志查看
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;  # Replace with your domain
+
+    # Optional: Redirect HTTP to HTTPS
+    # return 301 https://$server_name$request_uri;
+
+    location /github/webhook {
+        proxy_pass http://127.0.0.1:5000/webhook;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # GitHub webhook specific settings
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}
+```
+
+### 3. Enable Site
 
 ```bash
-# 查看 systemd 日志
+# Create symlink to enable site
+sudo ln -s /etc/nginx/sites-available/webhook-server /etc/nginx/sites-enabled/
+
+# Remove default site if exists
+sudo rm /etc/nginx/sites-enabled/default
+
+# Test configuration
+sudo nginx -t
+
+# Reload Nginx
+sudo systemctl reload nginx
+```
+
+### 4. Configure SSL (Recommended for Production)
+
+Using Let's Encrypt with Certbot:
+
+```bash
+# Install Certbot
+sudo apt install certbot python3-certbot-nginx  # Ubuntu/Debian
+
+# Obtain SSL certificate
+sudo certbot --nginx -d your-domain.com
+```
+
+### 5. GitHub Webhook Configuration with Nginx
+
+When using Nginx reverse proxy:
+
+1. Go to repository **Settings** > **Webhooks** > **Add webhook**
+
+2. Configure as follows:
+   - **Payload URL**: `https://your-domain.com/github/webhook`
+   - **Content type**: `application/json`  **(Important: must be JSON, not form)**
+   - **Secret**: Same value as `WEBHOOK_SECRET`
+   - **Events**: Select **Push events**
+
+3. After adding, GitHub will send a ping event to test the connection
+
+4. Verify the webhook is working - you should see a green checkmark if successful
+
+> **Note**: The Nginx location path `/github/webhook` can be customized, just ensure it proxies to `http://127.0.0.1:5000/webhook`
+
+## Log Viewing
+
+```bash
+# View systemd logs
 sudo journalctl -u webhook-server -f
 
-# 查看部署日志 API
+# View deployment logs via API
 curl http://localhost:5000/logs
 ```
 
-## 故障排查
+## Troubleshooting
 
-### 1. 签名验证失败
+### 1. Signature Verification Failed
 
-确保 GitHub Webhook 配置中的 Secret 与 `WEBHOOK_SECRET` 完全一致。
+Ensure the Secret in GitHub Webhook configuration exactly matches `WEBHOOK_SECRET`.
 
-### 2. IP 检查失败
+### 2. IP Check Failed
 
-如果服务器在代理后面，可能需要设置 `SKIP_IP_CHECK=true`。
+If the server is behind a proxy, you may need to set `SKIP_IP_CHECK=true`.
 
-### 3. 部署脚本失败
+### 3. Deployment Failed - No docs Folder
 
-检查部署脚本的执行权限和路径配置。
+Ensure your repository has a `docs/` directory with a `Makefile`.
+
+### 4. pip Install Failed
+
+Ensure `pip` is installed and accessible in the system PATH.

@@ -33,3 +33,16 @@ html_zip = f'your-project-{language}-{release}'  # noqa: F405
 # Enable Documentation Chatbot widget only for the latest version.
 if release == 'latest':
     html_js_files = html_js_files + ['js/chatbot_widget_cn.js']  # noqa: F405
+
+# HTML search options for Chinese
+# Configure Chinese language search to use proper stemmer
+html_search_options = {
+    'type': 'default'
+}
+
+
+def setup(app):
+    """Sphinx setup function for Chinese documentation."""
+    # Add custom Chinese query splitter with late priority to ensure it loads
+    # after searchtools.js and can override the default splitQuery function
+    app.add_js_file('js/chinese_splitter.js', priority=999)

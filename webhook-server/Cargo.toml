@@ -5,7 +5,8 @@ edition = "2021"
 description = "GitHub webhook server for auto-deploying documentation"
 
 [dependencies]
-axum = "0.7"
+axum = { version = "0.7", features = ["macros"] }
+axum-macros = "0.4"
 tokio = { version = "1", features = ["full", "process"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -17,8 +18,9 @@ hex = "0.4"
 dotenvy = "0.15"
 thiserror = "1"
 chrono = { version = "0.4", features = ["serde"] }
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 ipnetwork = "0.20"
+subtle = "2.5"
 
 [profile.release]
 opt-level = "z"
