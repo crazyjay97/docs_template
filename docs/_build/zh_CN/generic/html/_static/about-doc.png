@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200">
-  <rect fill="#f5f5f5" width="300" height="200"/>
-  <text fill="#333" font-family="Arial" font-size="20" font-weight="bold" text-anchor="middle" x="150" y="60">About Doc</text>
-  <text fill="#666" font-family="Arial" font-size="14" text-anchor="middle" x="150" y="100">Project Information</text>
-  <text fill="#666" font-family="Arial" font-size="14" text-anchor="middle" x="150" y="130">&amp; Documentation</text>
-  <circle fill="#C62817" cx="150" cy="170" r="15"/>
-  <text fill="white" font-family="Arial" font-size="10" text-anchor="middle" x="150" y="175">i</text>
-</svg>

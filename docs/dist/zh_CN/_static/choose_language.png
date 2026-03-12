@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="400" height="150" viewBox="0 0 400 150">
-  <rect fill="#fff" width="400" height="150" stroke="#ddd" stroke-width="2"/>
-  <text fill="#333" font-family="Arial" font-size="18" font-weight="bold" text-anchor="middle" x="200" y="40">Language Selection</text>
-  <rect fill="#e3f2fd" x="50" y="60" width="140" height="40" rx="5"/>
-  <text fill="#1976D2" font-family="Arial" font-size="16" text-anchor="middle" x="120" y="85">English</text>
-  <rect fill="#e3f2fd" x="210" y="60" width="140" height="40" rx="5"/>
-  <text fill="#1976D2" font-family="Arial" font-size="16" text-anchor="middle" x="280" y="85">中文</text>
-  <text fill="#999" font-family="Arial" font-size="12" text-anchor="middle" x="200" y="130">Click to switch language</text>
-</svg>

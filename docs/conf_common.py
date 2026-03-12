@@ -95,6 +95,7 @@ html_css_files = [
 html_js_files = [
     'js/version_table.js',
     'js/enhanced_search.js',  # Enhanced search functionality (Ctrl+K shortcut)
+    'js/language_switcher.js',  # Language switcher for nginx subdirectory deployments
 ]
 
 # ==============================================================================
@@ -191,24 +192,19 @@ def setup(app):
     from docutils.parsers.rst import roles
 
     def link_to_translation_role(name, rawtext, text, lineno, inliner, options={}, content=[]):
-        """Create a link to translated version."""
+        """Create a link to translated version using JavaScript for correct path handling."""
         # Parse text like "zh_CN:[中文]" or "en:[English]"
         import re
         match = re.match(r'(\w+):\[(.*?)\]', text)
         if match:
             lang, link_text = match.groups()
-            # Get current document path
-            env = inliner.document.settings.env
-            current_doc = env.docname
-
-            # Build the translation link using relative path
-            # Go up one level from current language dir, then into target language dir
-            if lang == 'zh_CN':
-                target = f'../zh_CN/{current_doc}.html'
-            else:
-                target = f'../en/{current_doc}.html'
-
+            # Use JavaScript onclick for dynamic path resolution
+            # The href is a fallback that works with JavaScript
+            target = '#'
             node = nodes.reference(rawtext, link_text, refuri=target, **options)
+            # Store target language in data attribute for JavaScript to use
+            node['classes'].append('lang-switch-link')
+            node['data-target-lang'] = lang
             return [node], []
         return [], []
 
