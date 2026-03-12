@@ -8,16 +8,11 @@
 (function() {
     'use strict';
 
-    // Available languages and their paths
     var LANGUAGES = {
         'en': 'English',
         'zh_CN': '简体中文'
     };
 
-    /**
-     * Get current language from URL path
-     * e.g., /template/zh_CN/index.html -> zh_CN
-     */
     function getCurrentLang() {
         var path = window.location.pathname;
         var parts = path.split('/');
@@ -26,59 +21,43 @@
                 return parts[i];
             }
         }
-        return 'en'; // default
+        return 'en';
     }
 
-    /**
-     * Get current page filename
-     * e.g., /template/zh_CN/index.html -> index.html
-     */
     function getCurrentPage() {
         var path = window.location.pathname;
         var parts = path.split('/');
         return parts[parts.length - 1] || 'index.html';
     }
 
-    /**
-     * Switch to another language
-     */
-    function switchLanguage(lang) {
-        var currentPage = getCurrentPage();
+    function getBasePath() {
         var path = window.location.pathname;
-
-        // Find the base path (everything before the language code)
-        var langIndex = path.indexOf('/' + lang + '/');
-        var basePath = '';
-
+        var currentLang = getCurrentLang();
+        var langIndex = path.indexOf('/' + currentLang + '/');
         if (langIndex > 0) {
-            basePath = path.substring(0, langIndex);
+            return path.substring(0, langIndex);
         }
+        return '';
+    }
 
-        // Build new URL
-        var newUrl = basePath + '/' + lang + '/' + currentPage;
-
-        // Navigate to new URL
+    function switchLanguage(targetLang) {
+        var basePath = getBasePath();
+        var currentPage = getCurrentPage();
+        var newUrl = basePath + '/' + targetLang + '/' + currentPage;
         window.location.href = newUrl;
     }
 
-    /**
-     * Create language selector dropdown
-     */
     function createLanguageSelector() {
         var currentLang = getCurrentLang();
-
-        // Create container
         var container = document.createElement('div');
         container.className = 'language-selector';
         container.style.cssText = 'position:fixed;top:15px;right:15px;z-index:9999;background:#fff;border:1px solid #ddd;padding:8px 12px;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.15);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;';
 
-        // Create label
         var label = document.createElement('span');
         label.textContent = 'Language: ';
         label.style.cssText = 'margin-right:8px;font-size:13px;color:#555;';
         container.appendChild(label);
 
-        // Create links for other languages
         var first = true;
         for (var lang in LANGUAGES) {
             if (lang === currentLang) continue;
@@ -91,17 +70,15 @@
             }
 
             var link = document.createElement('a');
-            link.href = '#';
+            link.href = 'javascript:void(0)';
             link.textContent = LANGUAGES[lang];
-            link.style.cssText = 'color:#428bca;text-decoration:none;font-size:13px;font-weight:500;transition:color 0.2s;';
-            link.onmouseover = function(el) { return function() { el.style.color = '#3071a9'; }; }(link);
-            link.onmouseout = function(el) { return function() { el.style.color = '#428bca'; }; }(link);
-            link.onclick = function(l) {
+            link.style.cssText = 'color:#428bca;text-decoration:none;font-size:13px;font-weight:500;';
+            link.onclick = (function(l) {
                 return function(e) {
                     e.preventDefault();
                     switchLanguage(l);
                 };
-            }(lang);
+            })(lang);
 
             container.appendChild(link);
             first = false;
@@ -110,37 +87,54 @@
         return container;
     }
 
-    /**
-     * Initialize language switcher
-     */
     function init() {
-        // Add language switcher to the page
+        // Add floating language selector
         var switcher = createLanguageSelector();
         document.body.appendChild(switcher);
 
-        // Also update any :link_to_translation: links (with data-target-lang attribute)
-        var translationLinks = document.querySelectorAll('a.lang-switch-link');
-        translationLinks.forEach(function(link) {
-            var targetLang = link.getAttribute('data-target-lang');
-            if (targetLang) {
-                link.onclick = function(e) {
-                    e.preventDefault();
-                    switchLanguage(targetLang);
-                };
-            }
-        });
+        // Fix all translation links - intercept clicks on any link containing language codes
+        function fixTranslationLinks() {
+            var links = document.querySelectorAll('a[href*="../en/"], a[href*="../zh_CN/"], a.lang-switch-link');
+            links.forEach(function(link) {
+                // Extract target language from href or data attribute
+                var href = link.getAttribute('href') || '';
+                var targetLang = null;
+
+                if (link.getAttribute('data-target-lang')) {
+                    targetLang = link.getAttribute('data-target-lang');
+                } else if (href.indexOf('/zh_CN/') >= 0 || href.indexOf('../zh_CN') >= 0) {
+                    targetLang = 'zh_CN';
+                } else if (href.indexOf('/en/') >= 0 || href.indexOf('../en') >= 0) {
+                    targetLang = 'en';
+                }
+
+                if (targetLang) {
+                    link.onclick = function(e) {
+                        e.preventDefault();
+                        switchLanguage(targetLang);
+                        return false;
+                    };
+                }
+            });
+        }
+
+        fixTranslationLinks();
+
+        // Also fix links that may be loaded dynamically
+        setTimeout(fixTranslationLinks, 500);
+        setTimeout(fixTranslationLinks, 1000);
     }
 
-    // Initialize when DOM is ready
+    // Initialize
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {
         init();
     }
 
-    // Expose globally
     window.LanguageSwitcher = {
         switch: switchLanguage,
-        getCurrentLang: getCurrentLang
+        getCurrentLang: getCurrentLang,
+        getBasePath: getBasePath
     };
 })();
