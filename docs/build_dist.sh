@@ -11,7 +11,8 @@ echo "Building documentation and preparing for deployment..."
 rm -rf dist
 
 # Run build if not already built
-if [ ! -d "_build/en/generic/html" ] || [ ! -d "_build/zh_CN/generic/html" ]; then
+# Check for both possible build output paths
+if [ ! -d "_build/en/html" ] || [ ! -d "_build/zh_CN/html" ]; then
     echo "Building documentation..."
     make build
     echo "Build completed."
@@ -21,16 +22,32 @@ fi
 mkdir -p dist
 
 # Copy built documentation to dist with language subdirectories
-if [ -d "_build/en/generic/html" ]; then
-    mkdir -p dist/en
-    cp -r _build/en/generic/html/* dist/en/
-    echo "✓ Copied English documentation"
+# Try both possible paths (with and without generic subdirectory)
+BUILD_EN_PATH="_build/en/html"
+BUILD_ZH_PATH="_build/zh_CN/html"
+
+# Fallback to generic subdirectory if needed
+if [ ! -d "$BUILD_EN_PATH" ] && [ -d "_build/en/generic/html" ]; then
+    BUILD_EN_PATH="_build/en/generic/html"
+fi
+if [ ! -d "$BUILD_ZH_PATH" ] && [ -d "_build/zh_CN/generic/html" ]; then
+    BUILD_ZH_PATH="_build/zh_CN/generic/html"
 fi
 
-if [ -d "_build/zh_CN/generic/html" ]; then
+if [ -d "$BUILD_EN_PATH" ]; then
+    mkdir -p dist/en
+    cp -r "$BUILD_EN_PATH"/* dist/en/
+    echo "✓ Copied English documentation"
+else
+    echo "⚠ Warning: English build directory not found: $BUILD_EN_PATH"
+fi
+
+if [ -d "$BUILD_ZH_PATH" ]; then
     mkdir -p dist/zh_CN
-    cp -r _build/zh_CN/generic/html/* dist/zh_CN/
+    cp -r "$BUILD_ZH_PATH"/* dist/zh_CN/
     echo "✓ Copied Chinese documentation"
+else
+    echo "⚠ Warning: Chinese build directory not found: $BUILD_ZH_PATH"
 fi
 
 # Create a landing page in the root
