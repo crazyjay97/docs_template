@@ -208,7 +208,7 @@ def setup(app):
             node = nodes.reference(rawtext, link_text, refuri=target, **options)
             # Store target language in data attribute for JavaScript to use
             node["classes"].append("lang-switch-link")
-            node["data-target-lang"] = lang
+            node["attributes"]["data-target-lang"] = lang
             return [node], []
         return [], []
 
