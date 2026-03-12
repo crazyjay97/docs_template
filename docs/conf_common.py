@@ -202,13 +202,14 @@ def setup(app):
         match = re.match(r"(\w+):\[(.*?)\]", text)
         if match:
             lang, link_text = match.groups()
-            # Use JavaScript onclick for dynamic path resolution
-            # The href is a fallback that works with JavaScript
-            target = "javascript:void(0)"
-            node = nodes.reference(rawtext, link_text, refuri=target, **options)
-            # Store target language in data attribute for JavaScript to use
-            node["classes"].append("lang-switch-link")
-            node["attributes"]["data-target-lang"] = lang
+            # 直接插入原始 HTML，这样 data-* 属性能被保留
+            html = (
+                f'<a href="javascript:void(0)" '
+                f'class="lang-switch-link" '
+                f'data-target-lang="{lang}">'
+                f"{link_text}</a>"
+            )
+            node = nodes.raw("", html, format="html")
             return [node], []
         return [], []
 
