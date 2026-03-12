@@ -4,6 +4,9 @@ sphinx>=5.0.0
 sphinx-rtd-theme>=1.0.0
 sphinx-copybutton>=0.5.0
 
+# 中文分词支持
+jieba>=0.42.0
+
 # Optional: wavedrom for drawing timing diagrams
 # Note: Requires libxcb.dylib on macOS. Install with: brew install libxcb
 # sphinxcontrib-wavedrom>=2.0.0

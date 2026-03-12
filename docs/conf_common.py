@@ -39,6 +39,7 @@ languages = ["en", "zh_CN"]
 # ==============================================================================
 extensions = [
     "sphinx_copybutton",
+    "jieba_search",  # Chinese word segmentation for better search
     # Note: sphinxcontrib.wavedrom is commented out by default because it requires
     # libxcb.dylib which may not be available on all systems.
     # To enable wavedrom, uncomment the following lines:
