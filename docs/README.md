@@ -1,7 +1,5 @@
 # Documentation Template
 
-基于 ESP-IDF 文档结构的可复用 Sphinx 文档模板，支持中英文国际化 (i18n)。
-
 ## 功能特性
 
 - **Sphinx**: 使用标准 Sphinx 构建系统
