@@ -48,13 +48,23 @@ deploy() {
     # 3. 构建文档
     log "步骤 3: 构建文档..."
     cd docs
-    if [ -f "build_dist.sh" ]; then
+
+    # 安装 Python 依赖（如果 requirements.txt 存在）
+    if [ -f "requirements.txt" ] && [ -d "../venv" ]; then
+        log "安装 Python 依赖..."
+        source ../venv/bin/activate && pip install -r requirements.txt -q
+    fi
+
+    # 使用 make 构建
+    if command -v make &> /dev/null; then
+        make build 2>&1 | tee -a "$LOG_FILE"
+    elif [ -f "build_dist.sh" ]; then
         bash build_dist.sh 2>&1 | tee -a "$LOG_FILE"
-        log "✓ 文档构建完成"
     else
-        error_log "未找到构建脚本：build_dist.sh"
+        error_log "未找到构建工具 (make 或 build_dist.sh)"
         exit 1
     fi
+    log "✓ 文档构建完成"
 
     # 4. 同步到部署目录
     log "步骤 4: 同步文件到部署目录..."

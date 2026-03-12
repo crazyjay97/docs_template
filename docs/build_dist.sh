@@ -13,7 +13,7 @@ rm -rf dist
 # Run build if not already built
 if [ ! -d "_build/en/generic/html" ] || [ ! -d "_build/zh_CN/generic/html" ]; then
     echo "Building documentation..."
-    source venv/bin/activate && build-docs
+    make build
     echo "Build completed."
 fi
 
