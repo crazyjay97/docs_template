@@ -41,16 +41,16 @@
   }
 
   function switchLanguage(targetLang) {
-    var parts = window.location.pathname.split("/");
+    const parts = window.location.pathname.split("/");
 
-    for (var i = 0; i < parts.length; i++) {
+    for (let i = 0; i < parts.length; i++) {
       if (LANGUAGES.hasOwnProperty(parts[i])) {
         parts[i] = targetLang;
         break;
       }
     }
 
-    window.location.href = parts.join("/");
+    window.location.href = parts.join("/") + window.location.hash;
   }
 
   function createLanguageSelector() {
@@ -99,43 +99,15 @@
     // Add floating language selector
     var switcher = createLanguageSelector();
     document.body.appendChild(switcher);
+    // 全局拦截语言切换链接
+    document.addEventListener("click", function (e) {
+      const link = e.target.closest(".lang-switch-link");
+      if (!link) return;
 
-    // Fix all translation links - intercept clicks on any link containing language codes
-    function fixTranslationLinks() {
-      var links = document.querySelectorAll(
-        'a[href*="../en/"], a[href*="../zh_CN/"], a.lang-switch-link',
-      );
-      links.forEach(function (link) {
-        // Extract target language from href or data attribute
-        var href = link.getAttribute("href") || "";
-        var targetLang = null;
-
-        if (link.getAttribute("data-target-lang")) {
-          targetLang = link.getAttribute("data-target-lang");
-        } else if (
-          href.indexOf("/zh_CN/") >= 0 ||
-          href.indexOf("../zh_CN") >= 0
-        ) {
-          targetLang = "zh_CN";
-        } else if (href.indexOf("/en/") >= 0 || href.indexOf("../en") >= 0) {
-          targetLang = "en";
-        }
-
-        if (targetLang) {
-          link.onclick = function (e) {
-            e.preventDefault();
-            switchLanguage(targetLang);
-            return false;
-          };
-        }
-      });
-    }
-
-    fixTranslationLinks();
-
-    // Also fix links that may be loaded dynamically
-    setTimeout(fixTranslationLinks, 500);
-    setTimeout(fixTranslationLinks, 1000);
+      e.preventDefault();
+      const lang = link.dataset.targetLang;
+      switchLanguage(lang);
+    });
   }
 
   // Initialize
