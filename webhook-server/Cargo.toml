@@ -1,0 +1,27 @@
+[package]
+name = "webhook-server"
+version = "0.1.0"
+edition = "2021"
+description = "GitHub webhook server for auto-deploying documentation"
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["full", "process"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"
+dotenvy = "0.15"
+thiserror = "1"
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.11", features = ["json"] }
+ipnetwork = "0.20"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

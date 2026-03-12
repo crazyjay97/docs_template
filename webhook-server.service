@@ -1,0 +1,34 @@
+[Unit]
+Description=GitHub Webhook Server for Docs Deployment
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/webhook-server
+
+# 环境变量
+Environment="PORT=5000"
+Environment="WEBHOOK_SECRET=your_webhook_secret_here"
+Environment="DEPLOY_SCRIPT=/opt/webhook-server/deploy.sh"
+Environment="REPO_DIR=/var/www/docs-source"
+Environment="DEPLOY_DIR=/var/www/docs"
+Environment="LOG_FILE=/var/log/webhook-deploy.log"
+
+# 启动命令
+ExecStart=/opt/webhook-server/target/release/webhook-server
+Restart=always
+RestartSec=3
+
+# 安全设置
+NoNewPrivileges=true
+PrivateTmp=true
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=webhook-server
+
+[Install]
+WantedBy=multi-user.target

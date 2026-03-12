@@ -94,6 +94,7 @@ html_css_files = [
 # JavaScript files (can be overridden in language-specific conf.py)
 html_js_files = [
     'js/version_table.js',
+    'js/enhanced_search.js',  # Enhanced search functionality (Ctrl+K shortcut)
 ]
 
 # ==============================================================================

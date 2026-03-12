@@ -1,0 +1,2 @@
+fn(axum::extract::State<AppState>, {type error}, axum::body::Bytes) -> impl Future<Output = StatusCode> {webhook}
+fn(axum::extract::State<AppState>, {type error}, axum::body::Bytes) -> impl Future<Output = StatusCode> {webhook}: Handler<_, _>
