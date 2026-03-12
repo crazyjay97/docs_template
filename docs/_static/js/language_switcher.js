@@ -42,14 +42,14 @@
 
   function switchLanguage(targetLang) {
     const parts = window.location.pathname.split("/");
-
+    console.log("targetLang:", targetLang);
     for (let i = 0; i < parts.length; i++) {
       if (LANGUAGES.hasOwnProperty(parts[i])) {
         parts[i] = targetLang;
         break;
       }
     }
-
+    console.log("targetHref:", parts.join("/") + window.location.hash);
     window.location.href = parts.join("/") + window.location.hash;
   }
 
