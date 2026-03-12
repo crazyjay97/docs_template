@@ -56,29 +56,90 @@ SKIP_IP_CHECK=false                    # Whether to skip IP check (default: fals
 ./target/release/webhook-server
 ```
 
-#### Option 2: Using systemd service
+#### Option 2: Install as systemd service (Recommended for Production)
 
-1. Copy service file to systemd directory:
+**Quick Install (Linux):**
+
+```bash
+# Make install script executable
+chmod +x install.sh
+
+# Run installation (requires root)
+sudo ./install.sh
+```
+
+**Manual Installation:**
+
+1. **Create installation directory:**
+
+```bash
+sudo mkdir -p /opt/webhook-server
+sudo cp target/release/webhook-server /opt/webhook-server/
+sudo chmod +x /opt/webhook-server/webhook-server
+```
+
+2. **Create required directories:**
+
+```bash
+sudo mkdir -p /var/www/docs-source
+sudo mkdir -p /var/www/docs
+sudo chown -R www-data:www-data /opt/webhook-server
+sudo chown -R www-data:www-data /var/www/docs-source
+sudo chown -R www-data:www-data /var/www/docs
+```
+
+3. **Copy and configure systemd service:**
 
 ```bash
 sudo cp webhook-server.service /etc/systemd/system/
 ```
 
-2. Edit `/etc/systemd/system/webhook-server.service`, modify `Environment` variables:
+4. **Edit `/etc/systemd/system/webhook-server.service`:**
 
 ```ini
-Environment="WEBHOOK_SECRET=your_actual_secret"
+[Service]
+# Required - Set your webhook secret
+Environment="WEBHOOK_SECRET=your_secret_key_generate_a_random_one"
+
+# Required - Set allowed users or orgs
+Environment="ALLOWED_USERS=crazyjay97"
+# Or for organizations:
+# Environment="ALLOWED_ORGS=your-org"
+
+# Recommended - Skip IP check when behind Nginx proxy
+Environment="SKIP_IP_CHECK=true"
+
+# Optional - Adjust directories if needed
 Environment="SOURCE_DIR=/var/www/docs-source"
 Environment="DEPLOY_DIR=/var/www/docs"
+Environment="PORT=5000"
 ```
 
-3. Start service:
+5. **Start the service:**
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable webhook-server
 sudo systemctl start webhook-server
 sudo systemctl status webhook-server
+```
+
+6. **View logs:**
+
+```bash
+# Follow logs in real-time
+sudo journalctl -u webhook-server -f
+
+# View recent logs
+sudo journalctl -u webhook-server -n 50
+```
+
+7. **Manage service:**
+
+```bash
+sudo systemctl stop webhook-server    # Stop
+sudo systemctl restart webhook-server # Restart
+sudo systemctl disable webhook-server # Disable on boot
 ```
 
 ## API Endpoints
@@ -125,7 +186,7 @@ After deployment, the directory structure will be:
 
 1. **Always set WEBHOOK_SECRET**: Prevents unauthorized requests
 2. **Configure whitelist**: Restrict organizations/users that can trigger deployment
-3. **Keep IP check enabled**: Ensures requests come from GitHub
+3. **Skip IP check when behind proxy**: Set `SKIP_IP_CHECK=true` when using Nginx reverse proxy
 4. **Use HTTPS**: Use reverse proxy (e.g., Nginx) with HTTPS in production
 
 ## Nginx Reverse Proxy Configuration

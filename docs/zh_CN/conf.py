@@ -43,6 +43,10 @@ html_search_options = {
 
 def setup(app):
     """Sphinx setup function for Chinese documentation."""
+    # Call the common setup function to register link_to_translation role
+    from conf_common import setup as common_setup
+    common_setup(app)
+
     # Add custom Chinese query splitter with late priority to ensure it loads
     # after searchtools.js and can override the default splitQuery function
     app.add_js_file('js/chinese_splitter.js', priority=999)

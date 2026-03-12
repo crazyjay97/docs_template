@@ -1,0 +1,22 @@
+[Unit]
+Description=GitHub Webhook Server for Auto Deployment
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/webhook-server
+ExecStart=/opt/webhook-server/webhook-server
+Restart=on-failure
+RestartSec=5
+
+# Environment variables - Edit these!
+Environment="WEBHOOK_SECRET=your_webhook_secret_here"
+Environment="SOURCE_DIR=/var/www/docs-source"
+Environment="DEPLOY_DIR=/var/www/docs"
+Environment="PORT=5000"
+Environment="ALLOWED_ORGS=your-org"
+Environment="ALLOWED_USERS=your-username"
+Environment="SKIP_IP_CHECK=true"
+
+[Install]
+WantedBy=multi-user.target

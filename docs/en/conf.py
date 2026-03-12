@@ -33,3 +33,10 @@ html_zip = f'your-project-{language}-{release}'  # noqa: F405
 # Enable Documentation Chatbot widget only for the latest version.
 if release == 'latest':
     html_js_files = html_js_files + ['js/chatbot_widget_en.js']  # noqa: F405
+
+
+def setup(app):
+    """Sphinx setup function for English documentation."""
+    # Call the common setup function to register link_to_translation role
+    from conf_common import setup as common_setup
+    common_setup(app)
