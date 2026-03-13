@@ -23,7 +23,12 @@ use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use tokio::process::Command;
 use tokio::sync::RwLock;
-use tracing::{error, info};
+use tokio::time::{self, Duration};
+use tracing::{error, info, Level};
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::fmt::Layer;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -54,6 +59,7 @@ struct AppConfig {
     source_dir: String,      // Directory to clone repositories
     deploy_dir: String,      // Directory to deploy dist output
     skip_ip_check: bool,
+    log_file_path: String,   // Log file path
 }
 
 impl Default for AppConfig {
@@ -84,6 +90,8 @@ impl Default for AppConfig {
                 .unwrap_or_default()
                 .parse()
                 .unwrap_or(false),
+            log_file_path: env::var("LOG_FILE_PATH")
+                .unwrap_or_else(|_| "webhook-server.log".to_string()),
         }
     }
 }
@@ -183,8 +191,45 @@ fn is_allowed_owner(
         || (owner_type != Some("Organization") && allowed_users.is_empty())
 }
 
+/// Retry configuration
+const MAX_RETRIES: u32 = 2;
+const RETRY_DELAY_SECS: u64 = 300; // 5 minutes
+
 /// Execute deployment: git clone/pull, pip install, make dist, copy dist
+/// Returns (success, attempts_made)
 async fn run_deployment(
+    source_dir: &str,
+    deploy_dir: &str,
+    repo_full_name: &str,
+    repo_name: &str,
+) -> Result<String, String> {
+    let mut last_error: Option<String> = None;
+
+    for attempt in 0..=MAX_RETRIES {
+        info!("Deployment attempt {} of {} for {}", attempt + 1, MAX_RETRIES + 1, repo_name);
+
+        match run_deployment_once(source_dir, deploy_dir, repo_full_name, repo_name).await {
+            Ok(output) => {
+                info!("Deployment succeeded on attempt {} for {}", attempt + 1, repo_name);
+                return Ok(output);
+            }
+            Err(e) => {
+                error!("Deployment attempt {} failed for {}: {}", attempt + 1, repo_name, e);
+                last_error = Some(e);
+
+                if attempt < MAX_RETRIES {
+                    info!("Retrying deployment for {} in {} seconds...", repo_name, RETRY_DELAY_SECS);
+                    time::sleep(Duration::from_secs(RETRY_DELAY_SECS)).await;
+                }
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| "Deployment failed after all retries".to_string()))
+}
+
+/// Single deployment attempt (without retry logic)
+async fn run_deployment_once(
     source_dir: &str,
     deploy_dir: &str,
     repo_full_name: &str,
@@ -295,6 +340,12 @@ async fn run_deployment(
     let target_dir = format!("{}/{}", deploy_dir.trim_end_matches('/'), repo_name);
 
     info!("Copying dist to {}...", target_dir);
+
+    // Remove existing target directory to ensure clean deployment
+    // This prevents stale files from previous builds
+    tokio::fs::remove_dir_all(&target_dir)
+        .await
+        .unwrap_or(());
 
     // Ensure deploy directory exists
     tokio::fs::create_dir_all(&target_dir)
@@ -528,18 +579,44 @@ async fn get_logs(State(state): State<AppState>) -> Json<Vec<DeploymentLog>> {
 
 #[tokio::main]
 async fn main() {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("webhook_server=info".parse().unwrap()),
-        )
-        .init();
-
-    // Load .env file
+    // Load .env file first
     let _ = dotenvy::dotenv();
 
-    let config = Arc::new(AppConfig::default());
+    let config = AppConfig::default();
+
+    // Setup file appender for logging
+    let file_appender = RollingFileAppender::new(
+        Rotation::DAILY,
+        env::current_dir().unwrap_or_default(),
+        &config.log_file_path,
+    );
+
+    // Initialize tracing with both file and console output
+    let file_layer = Layer::new()
+        .with_writer(file_appender)
+        .with_ansi(false)
+        .with_target(true)
+        .with_file(true)
+        .with_line_number(true);
+
+    let console_layer = Layer::new()
+        .with_ansi(true)
+        .with_target(false)
+        .with_thread_ids(false)
+        .with_thread_names(false);
+
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::filter::Targets::new()
+                .with_target("webhook_server", Level::INFO)
+                .with_target("tokio", Level::WARN)
+                .with_target("axum", Level::WARN),
+        )
+        .with(file_layer)
+        .with(console_layer)
+        .init();
+
+    let config = Arc::new(config);
     let deployment_log = Arc::new(RwLock::new(Vec::new()));
 
     // Parse GitHub IPs
@@ -572,6 +649,7 @@ async fn main() {
     info!("Starting webhook server on port {}", port);
     info!("Source directory: {}", source_dir);
     info!("Deploy directory: {}", deploy_dir);
+    info!("Log file: {}", config.log_file_path);
     info!(
         "Webhook secret configured: {}",
         if webhook_secret.is_empty() {
