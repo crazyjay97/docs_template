@@ -14,6 +14,11 @@ GitHub Webhook server for automated documentation deployment.
   - Runs `make dist` in the `docs/` folder
   - Copies the `dist/` output to the deployment directory
 - **Logging**: Records deployment history, queryable via API
+  - Console and file logging with daily rotation
+  - Configurable log file path via `LOG_FILE_PATH`
+- **Retry Mechanism**: Automatic retry on deployment failure
+  - Retries up to 2 times with 5-minute intervals
+  - Comprehensive logging for each attempt
 - **Health Check**: Provides `/health` endpoint for health monitoring
 
 ## Quick Start
@@ -46,6 +51,7 @@ PORT=5000                              # Service listen port (default: 5000)
 ALLOWED_ORGS=your-org                  # Allowed organization whitelist (comma-separated)
 ALLOWED_USERS=your-username            # Allowed user whitelist (comma-separated)
 SKIP_IP_CHECK=false                    # Whether to skip IP check (default: false)
+LOG_FILE_PATH=webhook-server.log       # Log file path (default: webhook-server.log)
 ```
 
 ### 3. Run
@@ -162,9 +168,13 @@ When a webhook is received for a `push` event to `main` or `master` branch:
 
 3. **Install dependencies**: If `docs/requirements.txt` exists, run `pip install -r requirements.txt`
 
-4. **Build documentation**: Run `make dist` in the `docs/` directory
+4. **Clean build**: Run `make clean` to remove old build artifacts
 
-5. **Deploy**: Copy contents of `docs/dist/` to `DEPLOY_DIR/repo`
+5. **Build documentation**: Run `make dist` in the `docs/` directory
+
+6. **Deploy**: Copy contents of `docs/dist/` to `DEPLOY_DIR/repo`
+
+If any step fails, the deployment will retry up to 2 times with 5-minute intervals.
 
 ## Directory Structure
 
@@ -282,7 +292,15 @@ sudo journalctl -u webhook-server -f
 
 # View deployment logs via API
 curl http://localhost:5000/logs
+
+# View log file (default: webhook-server.log in current directory)
+tail -f webhook-server.log
+
+# Or specify custom log path
+tail -f /var/log/webhook-server.log
 ```
+
+Log files are rotated daily with the naming format: `webhook-server.log.YYYY-MM-DD`
 
 ## Troubleshooting
 

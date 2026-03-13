@@ -318,6 +318,23 @@ async fn run_deployment_once(
         info!("No requirements.txt found, skipping pip install for {}", repo_name);
     }
 
+    // Run make clean
+    info!("Running make clean for {}...", repo_name);
+    let output = Command::new("make")
+        .arg("clean")
+        .current_dir(&docs_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run make clean: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!("make clean failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+    info!("make clean completed for {}", repo_name);
+
     // Run make dist
     info!("Running make dist for {}...", repo_name);
     let output = Command::new("make")
@@ -626,7 +643,7 @@ async fn main() {
         .collect();
 
     let state = AppState {
-        config,
+        config: config.clone(),
         deployment_log,
         github_ips: Arc::new(github_ips),
     };
@@ -638,6 +655,7 @@ async fn main() {
     let allowed_orgs = state.config.allowed_orgs.clone();
     let allowed_users = state.config.allowed_users.clone();
     let skip_ip_check = state.config.skip_ip_check;
+    let log_file_path = state.config.log_file_path.clone();
 
     // Build router
     let app = Router::new()
@@ -649,7 +667,7 @@ async fn main() {
     info!("Starting webhook server on port {}", port);
     info!("Source directory: {}", source_dir);
     info!("Deploy directory: {}", deploy_dir);
-    info!("Log file: {}", config.log_file_path);
+    info!("Log file: {}", log_file_path);
     info!(
         "Webhook secret configured: {}",
         if webhook_secret.is_empty() {
