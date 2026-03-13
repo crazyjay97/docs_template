@@ -11,5 +11,7 @@
 
 docs/_build
 
+docs/dist
+
 
 CLAUDE.md
