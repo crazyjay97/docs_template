@@ -58,15 +58,17 @@ basic-syntax
 :end-line: 10
 ```
 
-### 包含代码文件（示例 - 需要实际文件）
+### 包含代码文件语法
 
-```{literalinclude} ../../get-started/quickstart.py
+下面展示 `literalinclude` 的写法。为了避免示例页在默认构建时依赖不存在的文件，这里只展示语法，不实际执行：
+
+````markdown
+```{literalinclude} path/to/example.py
 :language: python
 :lines: 1-20
 :caption: 示例代码
 ```
-
-注意：上面示例假定 `quickstart.py` 文件存在。如果文件不存在，构建时会看到警告。
+````
 
 ## 术语表
 
@@ -135,6 +137,7 @@ API
 
 注意：CSV 表格选项必须从第 0 列开始，不能有前导空格。
 
+````markdown
 ```{csv-table}
 :header: "姓名","年龄","城市"
 :widths: 20, 10, 30
@@ -143,6 +146,7 @@ API
 "鲍勃", 30, "伦敦"
 "查理", 35, "东京"
 ```
+````
 
 ### 列表表格
 
@@ -168,8 +172,9 @@ tabs 指令需要 `sphinx-tabs` 扩展。启用方法：
 1. 安装：`pip install sphinx-tabs`
 2. 在 `conf_common.py` 的 `extensions` 中添加：`'sphinx_tabs.tabs'`
 
-示例语法（如果未安装扩展将显示为代码块）：
+示例语法：
 
+`````markdown
 ````{tabs}
 ```{group-tab} Python
 
@@ -188,6 +193,7 @@ function hello() {
 ```
 ```
 ````
+`````
 
 ## 自定义指令
 
@@ -229,9 +235,11 @@ bibliography 指令需要 `sphinxcontrib-bibtex` 扩展。启用方法：
 
 示例语法：
 
+````markdown
 ```{bibliography}
 :style: unsrt
 ```
+````
 
 ## 总结
 

@@ -58,15 +58,17 @@ You can link to this section using `[link](label-example)`.
 :end-line: 10
 ```
 
-### Include Code File (example - requires actual file)
+### Include Code File Syntax
 
-```{literalinclude} ../../get-started/quickstart.py
+This shows the `literalinclude` syntax only. To keep the example page warning-free in a default build, it does not try to include a real file:
+
+````markdown
+```{literalinclude} path/to/example.py
 :language: python
 :lines: 1-20
 :caption: Example Code
 ```
-
-Note: The above example assumes a `quickstart.py` file exists. If the file doesn't exist, you'll see a warning during build.
+````
 
 ## Glossary Terms
 
@@ -135,6 +137,7 @@ Reference the figure: See [Figure 1](figure-example).
 
 Note: CSV table options must start at column 0 with no leading spaces.
 
+````markdown
 ```{csv-table}
 :header: "Name","Age","City"
 :widths: 20, 10, 30
@@ -143,6 +146,7 @@ Note: CSV table options must start at column 0 with no leading spaces.
 "Bob", 30, "London"
 "Charlie", 35, "Tokyo"
 ```
+````
 
 ### List Tables
 
@@ -168,8 +172,9 @@ The tabs directive requires the `sphinx-tabs` extension. To enable it:
 1. Install: `pip install sphinx-tabs`
 2. Add to `extensions` in `conf_common.py`: `'sphinx_tabs.tabs'`
 
-Example syntax (will show as code block if extension not installed):
+Example syntax:
 
+`````markdown
 ````{tabs}
 ```{group-tab} Python
 
@@ -188,6 +193,7 @@ function hello() {
 ```
 ```
 ````
+`````
 
 ## Custom Directives
 
@@ -229,9 +235,11 @@ The bibliography directive requires the `sphinxcontrib-bibtex` extension. To ena
 
 Example syntax:
 
+````markdown
 ```{bibliography}
 :style: unsrt
 ```
+````
 
 ## Summary
 
