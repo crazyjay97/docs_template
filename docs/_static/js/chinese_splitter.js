@@ -7,18 +7,17 @@
  * Sphinx's jieba extension indexes Chinese text by splitting into
  * meaningful words (e.g., "文档搜索" -> ["文档", "搜索"]).
  *
- * Our splitter generates multiple n-grams to maximize matching:
- * - Unigrams (single chars) - for partial matches
- * - Bigrams (2-char words) - most common Chinese word length
- * - Trigrams (3-char words) - for longer terms
- * - Full phrase - for exact matches
+ * Our splitter uses a conservative chunking strategy for Chinese queries.
+ * This is necessary because current Sphinx search treats split terms as
+ * required matches. Overlapping n-grams like ["预览", "览功", "功能"] make
+ * normal phrases impossible to match unless every n-gram is indexed.
  */
 
 (function() {
     'use strict';
 
     /**
-     * Chinese query splitter that generates n-grams
+     * Chinese query splitter that generates conservative Chinese chunks
      * to match against jieba-indexed content
      *
      * @param {string} query - The search query to split
@@ -56,23 +55,26 @@
             words.forEach(function(word) {
                 var len = word.length;
 
-                // Add the full word
+                if (len <= 2) {
+                    terms.push(word);
+                    return;
+                }
+
+                // Chinese technical terms are very often 2-char compounds.
+                // Use non-overlapping 2-char chunks so queries like
+                // "预览功能" become ["预览", "功能"] instead of
+                // ["预览", "览功", "功能"].
+                if (len % 2 === 0) {
+                    for (var i = 0; i < len; i += 2) {
+                        terms.push(word.substring(i, i + 2));
+                    }
+                    return;
+                }
+
+                // For odd-length words, keep the full term as a fallback.
+                // Project-specific terms should be added to docs/search_dict.txt
+                // so the build index and query splitting can agree on the word.
                 terms.push(word);
-
-                // Generate all possible bigrams (most important for Chinese)
-                for (var i = 0; i < len - 1; i++) {
-                    terms.push(word.substring(i, i + 2));
-                }
-
-                // Generate trigrams for words of 3+ characters
-                for (var i = 0; i < len - 2; i++) {
-                    terms.push(word.substring(i, i + 3));
-                }
-
-                // Generate 4-grams for words of 4+ characters
-                for (var i = 0; i < len - 3; i++) {
-                    terms.push(word.substring(i, i + 4));
-                }
             });
         }
 
