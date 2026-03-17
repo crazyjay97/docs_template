@@ -5,7 +5,10 @@ sphinx-rtd-theme>=1.0.0
 sphinx-copybutton>=0.5.0
 
 # Markdown support
-myst-parser>=2.0.0
+# Use a broad compatible range because some package mirrors only provide
+# versions up to 0.16.1, and the Markdown examples in this repo do not
+# require MyST 2.x-specific features.
+myst-parser>=0.16.1
 
 # 中文分词支持
 jieba>=0.42.0
