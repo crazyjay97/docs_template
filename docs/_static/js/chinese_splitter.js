@@ -109,12 +109,14 @@
             // Override _parseQuery to handle Chinese properly
             // Chinese words should NOT be stemmed
             Search._parseQuery = function(query) {
+                var stemmer = new Stemmer();
+                var normalizedQuery = query.trim();
                 var searchTerms = new Set();
                 var excludedTerms = new Set();
                 var highlightTerms = new Set();
-                var objectTerms = new Set(chineseSplitQuery(query));
+                var objectTerms = new Set(chineseSplitQuery(query.toLowerCase().trim()));
 
-                chineseSplitQuery(query).forEach(function(queryTerm) {
+                chineseSplitQuery(normalizedQuery).forEach(function(queryTerm) {
                     var queryTermLower = queryTerm.toLowerCase();
 
                     // Skip stopwords and pure numbers
@@ -127,22 +129,25 @@
                     // Stemming is for European languages only
                     var isChinese = /[\u4e00-\u9fff]/.test(queryTerm);
 
-                    if (isChinese) {
-                        searchTerms.add(queryTerm);
-                        highlightTerms.add(queryTerm);
-                    } else {
-                        // For Latin words, apply stemming
-                        searchTerms.add(queryTermLower);
-                        highlightTerms.add(queryTerm);
+                    var word = isChinese ? queryTerm : stemmer.stemWord(queryTermLower);
+
+                    if (word[0] === '-') {
+                        excludedTerms.add(word.substr(1));
+                        return;
                     }
+
+                    searchTerms.add(word);
+                    highlightTerms.add(isChinese ? queryTerm : queryTermLower);
                 });
 
-                return {
-                    searchTerms: searchTerms,
-                    excludedTerms: excludedTerms,
-                    highlightTerms: highlightTerms,
-                    objectTerms: objectTerms
-                };
+                if (typeof SPHINX_HIGHLIGHT_ENABLED !== 'undefined' && SPHINX_HIGHLIGHT_ENABLED) {
+                    localStorage.setItem(
+                        'sphinx_highlight_terms',
+                        Array.from(highlightTerms).join(' ')
+                    );
+                }
+
+                return [normalizedQuery, searchTerms, excludedTerms, highlightTerms, objectTerms];
             };
         }
 
