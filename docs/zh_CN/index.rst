@@ -42,5 +42,6 @@
    get-started/index
    api-reference/index
    api-guides/index
+   markdown-examples/index
    about
    languages

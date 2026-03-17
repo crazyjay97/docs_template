@@ -42,5 +42,6 @@ This is the documentation for Your Project. This project provides a comprehensiv
    get-started/index
    api-reference/index
    api-guides/index
+   markdown-examples/index
    about
    languages

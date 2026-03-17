@@ -11,6 +11,8 @@ import re
 import sys
 from pathlib import Path
 
+import jieba
+
 # ==============================================================================
 # Base Sphinx Configuration (standalone, no esp-docs dependency required)
 # ==============================================================================
@@ -35,9 +37,39 @@ version = os.environ.get("PROJECT_VERSION", "1.0")
 languages = ["en", "zh_CN"]
 
 # ==============================================================================
+# Source File Suffix Configuration
+# ==============================================================================
+# Support both reStructuredText and Markdown
+source_suffix = {
+    ".rst": "restructuredtext",
+    ".md": "markdown",
+}
+
+# ==============================================================================
+# MyST-Parser Configuration (Markdown support)
+# ==============================================================================
+# Enable various MyST extensions for Sphinx compatibility
+myst_enable_extensions = [
+    "amsmath",
+    "colon_fence",
+    "deflist",
+    "dollarmath",
+    "html_image",
+    # "linkify",  # Requires linkify-it-py, commented out by default
+    "replacements",
+    "smartquotes",
+    "substitution",
+    "tasklist",
+]
+
+# Allow HTML directives in Markdown (needed for toctree, etc.)
+myst_heading_anchors = 3  # Enable anchor links for headers up to level 3
+
+# ==============================================================================
 # Sphinx Extensions
 # ==============================================================================
 extensions = [
+    "myst_parser",  # Markdown support
     "sphinx_copybutton",
     "jieba_search",  # Chinese word segmentation for better search
     # Note: sphinxcontrib.wavedrom is commented out by default because it requires
@@ -178,6 +210,15 @@ latex_elements = {
 # ==============================================================================
 epub_show_urls = "footnote"
 epub_description = "Your Project Documentation"
+
+# ==============================================================================
+# Chinese Search Dictionary
+# ==============================================================================
+# Load a project-specific jieba dictionary when present so domain terms are
+# indexed as complete words during Sphinx search index generation.
+search_dict_file = Path(os.path.dirname(__file__)) / "search_dict.txt"
+if search_dict_file.exists():
+    jieba.load_userdict(str(search_dict_file))
 
 
 # ==============================================================================
