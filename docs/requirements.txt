@@ -1,14 +1,13 @@
 # Python dependencies for building the documentation
 # Core Sphinx
-sphinx>=5.0.0
-sphinx-rtd-theme>=1.0.0
-sphinx-copybutton>=0.5.0
+sphinx>=4,<5
+sphinx-rtd-theme>=1,<2
+sphinx-copybutton>=0.5,<1
 
 # Markdown support
-# Use a broad compatible range because some package mirrors only provide
-# versions up to 0.16.1, and the Markdown examples in this repo do not
-# require MyST 2.x-specific features.
-myst-parser>=0.16.1
+# Some package mirrors only provide MyST up to 0.16.1. Pin to the older
+# generation that is compatible with Sphinx 4.x.
+myst-parser>=0.16.1,<0.17
 
 # 中文分词支持
 jieba>=0.42.0
