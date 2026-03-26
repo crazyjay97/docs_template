@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 import jieba
+from docutils import nodes
 
 # ==============================================================================
 # Base Sphinx Configuration (standalone, no esp-docs dependency required)
@@ -225,13 +226,13 @@ if search_dict_file.exists():
 # Setup function for custom initialization
 # ==============================================================================
 def setup(app):
+    app.connect("doctree-resolved", fix_image_path)
     """Sphinx setup function."""
     # Add custom tags if needed
     # app.add_config_value('my_custom_option', 'default_value', 'html')
 
     # Add link_to_translation role for i18n support
     # This creates a simple role that links to translated versions
-    from docutils import nodes
     from docutils.parsers.rst import roles
 
     def link_to_translation_role(
@@ -256,6 +257,16 @@ def setup(app):
         return [], []
 
     roles.register_local_role("link_to_translation", link_to_translation_role)
+
+
+def fix_image_path(app, doctree, docname):
+    for node in doctree.traverse(nodes.image):
+        uri = node.get("uri", "")
+
+        # 如果被 Sphinx 自动加了目录，比如 general/_images
+        if "/_images/" in uri:
+            node["uri"] = uri.split("/_images/", 1)[1]
+            node["uri"] = "_images/" + node["uri"]
 
 
 # ==============================================================================

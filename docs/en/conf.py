@@ -36,6 +36,18 @@ html_zip = f"your-project-{language}-{release}"  # noqa: F405
 
 
 def setup(app):
+    import shutil
+
+    src_root = Path(app.srcdir)
+    out_root = Path(app.outdir)
+    # 找到所有 _images 目录
+    for img_dir in src_root.rglob("_images"):
+        rel = img_dir.relative_to(src_root)
+        target = out_root / rel
+        if img_dir.is_dir():
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(img_dir, target)
     """Sphinx setup function for English documentation."""
     # Call the common setup function to register link_to_translation role
     from conf_common import setup as common_setup

@@ -9,8 +9,9 @@ GitHub Webhook server for automated documentation deployment.
   - GitHub official IP range verification
   - Organization/user whitelist verification
 - **Auto Deployment**: Listens to `push` events and automatically:
-  - Clones or pulls the repository
+  - Clones or force-syncs the repository to the remote branch
   - Installs pip dependencies from `docs/requirements.txt`
+  - Ensures helper scripts are executable before running `make`
   - Runs `make dist` in the `docs/` folder
   - Copies the `dist/` output to the deployment directory
 - **Logging**: Records deployment history, queryable via API
@@ -161,18 +162,20 @@ sudo systemctl disable webhook-server # Disable on boot
 When a webhook is received for a `push` event to `main` or `master` branch:
 
 1. **Clone/Pull**:
-   - If repository doesn't exist: `git clone https://github.com/owner/repo.git` to `SOURCE_DIR/repo`
-   - If repository exists: `git pull` to get latest changes
+   - If repository doesn't exist: `git clone --branch <branch> https://github.com/owner/repo.git` to `SOURCE_DIR/repo`
+   - If repository exists: `git fetch origin <branch>` and then `git checkout -B <branch> origin/<branch>`, `git reset --hard origin/<branch>`, `git clean -fd`
 
 2. **Find docs folder**: Look for `docs/` directory in the cloned repository
 
 3. **Install dependencies**: If `docs/requirements.txt` exists, run `pip install -r requirements.txt`
 
-4. **Clean build**: Run `make clean` to remove old build artifacts
+4. **Fix script permissions**: Run `chmod +x` for `docs/*.sh` and files in `docs/scripts/`
 
-5. **Build documentation**: Run `make dist` in the `docs/` directory
+5. **Clean build**: Run `make clean` to remove old build artifacts
 
-6. **Deploy**: Copy contents of `docs/dist/` to `DEPLOY_DIR/repo`
+6. **Build documentation**: Run `make dist` in the `docs/` directory
+
+7. **Deploy**: Copy contents of `docs/dist/` to `DEPLOY_DIR/repo`
 
 If any step fails, the deployment will retry up to 2 times with 5-minute intervals.
 

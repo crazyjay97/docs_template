@@ -56,10 +56,10 @@ struct AppConfig {
     port: u16,
     allowed_orgs: Vec<String>,
     allowed_users: Vec<String>,
-    source_dir: String,      // Directory to clone repositories
-    deploy_dir: String,      // Directory to deploy dist output
+    source_dir: String, // Directory to clone repositories
+    deploy_dir: String, // Directory to deploy dist output
     skip_ip_check: bool,
-    log_file_path: String,   // Log file path
+    log_file_path: String, // Log file path
 }
 
 impl Default for AppConfig {
@@ -84,8 +84,7 @@ impl Default for AppConfig {
                 .collect(),
             source_dir: env::var("SOURCE_DIR")
                 .unwrap_or_else(|_| "/var/www/docs-source".to_string()),
-            deploy_dir: env::var("DEPLOY_DIR")
-                .unwrap_or_else(|_| "/var/www/docs".to_string()),
+            deploy_dir: env::var("DEPLOY_DIR").unwrap_or_else(|_| "/var/www/docs".to_string()),
             skip_ip_check: env::var("SKIP_IP_CHECK")
                 .unwrap_or_default()
                 .parse()
@@ -202,23 +201,49 @@ async fn run_deployment(
     deploy_dir: &str,
     repo_full_name: &str,
     repo_name: &str,
+    branch_ref: &str,
 ) -> Result<String, String> {
     let mut last_error: Option<String> = None;
 
     for attempt in 0..=MAX_RETRIES {
-        info!("Deployment attempt {} of {} for {}", attempt + 1, MAX_RETRIES + 1, repo_name);
+        info!(
+            "Deployment attempt {} of {} for {}",
+            attempt + 1,
+            MAX_RETRIES + 1,
+            repo_name
+        );
 
-        match run_deployment_once(source_dir, deploy_dir, repo_full_name, repo_name).await {
+        match run_deployment_once(
+            source_dir,
+            deploy_dir,
+            repo_full_name,
+            repo_name,
+            branch_ref,
+        )
+        .await
+        {
             Ok(output) => {
-                info!("Deployment succeeded on attempt {} for {}", attempt + 1, repo_name);
+                info!(
+                    "Deployment succeeded on attempt {} for {}",
+                    attempt + 1,
+                    repo_name
+                );
                 return Ok(output);
             }
             Err(e) => {
-                error!("Deployment attempt {} failed for {}: {}", attempt + 1, repo_name, e);
+                error!(
+                    "Deployment attempt {} failed for {}: {}",
+                    attempt + 1,
+                    repo_name,
+                    e
+                );
                 last_error = Some(e);
 
                 if attempt < MAX_RETRIES {
-                    info!("Retrying deployment for {} in {} seconds...", repo_name, RETRY_DELAY_SECS);
+                    info!(
+                        "Retrying deployment for {} in {} seconds...",
+                        repo_name, RETRY_DELAY_SECS
+                    );
                     time::sleep(Duration::from_secs(RETRY_DELAY_SECS)).await;
                 }
             }
@@ -234,30 +259,101 @@ async fn run_deployment_once(
     deploy_dir: &str,
     repo_full_name: &str,
     repo_name: &str,
+    branch_ref: &str,
 ) -> Result<String, String> {
     let repo_path = format!("{}/{}", source_dir.trim_end_matches('/'), repo_name);
     let repo_url = format!("https://github.com/{}.git", repo_full_name);
+    let branch_name = branch_ref.strip_prefix("refs/heads/").unwrap_or(branch_ref);
 
     // Check if repository already exists
     let repo_exists = tokio::fs::try_exists(&repo_path).await.unwrap_or(false);
 
     if repo_exists {
-        // Pull latest changes
-        info!("Repository {} exists, pulling latest changes...", repo_name);
+        // Force local checkout to match the remote branch exactly.
+        info!(
+            "Repository {} exists, syncing to remote branch {}...",
+            repo_name, branch_name
+        );
         let output = Command::new("git")
-            .arg("pull")
+            .arg("fetch")
+            .arg("origin")
+            .arg(branch_name)
             .current_dir(&repo_path)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
             .await
-            .map_err(|e| format!("Failed to run git pull: {}", e))?;
+            .map_err(|e| format!("Failed to run git fetch: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!("git pull failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "git fetch failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
-        info!("git pull completed for {}", repo_name);
+
+        let output = Command::new("git")
+            .arg("checkout")
+            .arg("-B")
+            .arg(branch_name)
+            .arg(format!("origin/{}", branch_name))
+            .current_dir(&repo_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run git checkout: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "git checkout failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        let output = Command::new("git")
+            .arg("reset")
+            .arg("--hard")
+            .arg(format!("origin/{}", branch_name))
+            .current_dir(&repo_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run git reset --hard: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "git reset --hard failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        let output = Command::new("git")
+            .arg("clean")
+            .arg("-fd")
+            .current_dir(&repo_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run git clean: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "git clean failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        info!(
+            "Repository {} synced to origin/{} successfully",
+            repo_name, branch_name
+        );
     } else {
         // Clone repository
         info!("Cloning repository {}...", repo_url);
@@ -269,6 +365,8 @@ async fn run_deployment_once(
 
         let output = Command::new("git")
             .arg("clone")
+            .arg("--branch")
+            .arg(branch_name)
             .arg(&repo_url)
             .arg(&repo_path)
             .stdin(Stdio::null())
@@ -279,7 +377,10 @@ async fn run_deployment_once(
             .map_err(|e| format!("Failed to run git clone: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!("git clone failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "git clone failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
         info!("git clone completed for {}", repo_name);
     }
@@ -295,7 +396,9 @@ async fn run_deployment_once(
     // Install pip dependencies
     info!("Installing pip dependencies for {}...", repo_name);
     let requirements_path = format!("{}/requirements.txt", docs_path);
-    let requirements_exists = tokio::fs::try_exists(&requirements_path).await.unwrap_or(false);
+    let requirements_exists = tokio::fs::try_exists(&requirements_path)
+        .await
+        .unwrap_or(false);
 
     if requirements_exists {
         let output = Command::new("pip")
@@ -311,12 +414,55 @@ async fn run_deployment_once(
             .map_err(|e| format!("Failed to run pip install: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!("pip install failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "pip install failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
         info!("pip install completed for {}", repo_name);
     } else {
-        info!("No requirements.txt found, skipping pip install for {}", repo_name);
+        info!(
+            "No requirements.txt found, skipping pip install for {}",
+            repo_name
+        );
     }
+
+    // Ensure build helper scripts are executable before running make.
+    info!(
+        "Ensuring helper scripts are executable for {}...",
+        repo_name
+    );
+    let output = Command::new("find")
+        .arg(".")
+        .arg("(")
+        .arg("-path")
+        .arg("./scripts/*")
+        .arg("-o")
+        .arg("-name")
+        .arg("*.sh")
+        .arg(")")
+        .arg("-type")
+        .arg("f")
+        .arg("-exec")
+        .arg("chmod")
+        .arg("+x")
+        .arg("{}")
+        .arg("+")
+        .current_dir(&docs_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| format!("Failed to chmod helper scripts: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "chmod helper scripts failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    info!("Helper scripts are executable for {}", repo_name);
 
     // Run make clean
     info!("Running make clean for {}...", repo_name);
@@ -331,7 +477,10 @@ async fn run_deployment_once(
         .map_err(|e| format!("Failed to run make clean: {}", e))?;
 
     if !output.status.success() {
-        return Err(format!("make clean failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "make clean failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     info!("make clean completed for {}", repo_name);
 
@@ -348,7 +497,10 @@ async fn run_deployment_once(
         .map_err(|e| format!("Failed to run make dist: {}", e))?;
 
     if !output.status.success() {
-        return Err(format!("make dist failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "make dist failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     info!("make dist completed for {}", repo_name);
 
@@ -360,9 +512,7 @@ async fn run_deployment_once(
 
     // Remove existing target directory to ensure clean deployment
     // This prevents stale files from previous builds
-    tokio::fs::remove_dir_all(&target_dir)
-        .await
-        .unwrap_or(());
+    tokio::fs::remove_dir_all(&target_dir).await.unwrap_or(());
 
     // Ensure deploy directory exists
     tokio::fs::create_dir_all(&target_dir)
@@ -370,11 +520,13 @@ async fn run_deployment_once(
         .map_err(|e| format!("Failed to create deploy directory: {}", e))?;
 
     // Copy dist contents to deploy directory
-    copy_directory(&dist_path, &target_dir)
-        .map_err(|e| format!("Failed to copy dist: {}", e))?;
+    copy_directory(&dist_path, &target_dir).map_err(|e| format!("Failed to copy dist: {}", e))?;
 
     info!("Deployment completed for {} to {}", repo_name, target_dir);
-    Ok(format!("Successfully deployed {} to {}", repo_name, target_dir))
+    Ok(format!(
+        "Successfully deployed {} to {}",
+        repo_name, target_dir
+    ))
 }
 
 /// Recursively copy directory contents
@@ -554,7 +706,10 @@ async fn webhook(
             &config.deploy_dir,
             &repo_full_name,
             repo_name,
-        ).await {
+            &branch,
+        )
+        .await
+        {
             Ok(output) => {
                 info!("Deployment completed successfully");
                 ("success".to_string(), output)
@@ -687,7 +842,10 @@ async fn main() {
         .await
         .expect("Failed to bind to port");
 
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .await
-        .expect("Failed to start server");
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("Failed to start server");
 }
