@@ -10,9 +10,11 @@ GitHub Webhook server for automated documentation deployment.
   - Organization/user whitelist verification
 - **Auto Deployment**: Listens to `push` events and automatically:
   - Clones or force-syncs the repository to the remote branch
-  - Installs pip dependencies from `docs/requirements.txt`
+  - Creates a Python virtual environment in `docs/venv` (configurable) and bootstraps pip
+    (falls back to `get-pip.py` when `ensurepip` is unavailable)
+  - Installs pip dependencies from `docs/requirements.txt` inside the venv
   - Ensures helper scripts are executable before running `make`
-  - Runs `make dist` in the `docs/` folder
+  - Runs `make dist` in the `docs/` folder with the venv's `bin/` on `PATH`
   - Copies the `dist/` output to the deployment directory
 - **Logging**: Records deployment history, queryable via API
   - Console and file logging with daily rotation
@@ -53,6 +55,12 @@ ALLOWED_ORGS=your-org                  # Allowed organization whitelist (comma-s
 ALLOWED_USERS=your-username            # Allowed user whitelist (comma-separated)
 SKIP_IP_CHECK=false                    # Whether to skip IP check (default: false)
 LOG_FILE_PATH=webhook-server.log       # Log file path (default: webhook-server.log)
+
+# Virtual environment configuration
+USE_VENV=true                          # Use Python venv for pip/make (default: true)
+VENV_DIR=venv                          # Venv directory, relative to docs/ (default: venv)
+PYTHON_BIN=python3                     # Python used to create the venv (default: python3)
+UPGRADE_PIP=true                       # Upgrade pip/setuptools/wheel in venv (default: true)
 ```
 
 ### 3. Run
@@ -167,15 +175,21 @@ When a webhook is received for a `push` event to `main` or `master` branch:
 
 2. **Find docs folder**: Look for `docs/` directory in the cloned repository
 
-3. **Install dependencies**: If `docs/requirements.txt` exists, run `pip install -r requirements.txt`
+3. **Prepare venv** (when `USE_VENV=true`, default):
+   - Create `docs/<VENV_DIR>` with `<PYTHON_BIN> -m venv` if it doesn't exist
+   - If `ensurepip` is missing, download `get-pip.py` from `bootstrap.pypa.io` and bootstrap pip
+   - Optionally upgrade pip/setuptools/wheel (`UPGRADE_PIP=true`)
 
-4. **Fix script permissions**: Run `chmod +x` for `docs/*.sh` and files in `docs/scripts/`
+4. **Install dependencies**: If `docs/requirements.txt` exists, run `pip install -r requirements.txt`
+   (uses the venv's `python -m pip` when venv is enabled)
 
-5. **Clean build**: Run `make clean` to remove old build artifacts
+5. **Fix script permissions**: Run `chmod +x` for `docs/*.sh` and files in `docs/scripts/`
 
-6. **Build documentation**: Run `make dist` in the `docs/` directory
+6. **Clean build**: Run `make clean` to remove old build artifacts
 
-7. **Deploy**: Copy contents of `docs/dist/` to `DEPLOY_DIR/repo`
+7. **Build documentation**: Run `make dist` in the `docs/` directory (with venv's `bin/` prepended to `PATH`)
+
+8. **Deploy**: Copy contents of `docs/dist/` to `DEPLOY_DIR/repo`
 
 If any step fails, the deployment will retry up to 2 times with 5-minute intervals.
 
@@ -321,4 +335,11 @@ Ensure your repository has a `docs/` directory with a `Makefile`.
 
 ### 4. pip Install Failed
 
-Ensure `pip` is installed and accessible in the system PATH.
+When `USE_VENV=true` (default), pip is installed inside `docs/<VENV_DIR>` — the system
+`pip` is not required. If venv creation itself fails, ensure `PYTHON_BIN` (default
+`python3`) points to a working Python 3 with the `venv` module available
+(`apt install python3-venv` on Debian/Ubuntu). If `ensurepip` is unavailable, the
+server will automatically download `get-pip.py` — make sure the host has outbound
+access to `bootstrap.pypa.io`.
+
+To disable venv entirely and use system pip, set `USE_VENV=false`.

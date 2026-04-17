@@ -60,6 +60,10 @@ struct AppConfig {
     deploy_dir: String, // Directory to deploy dist output
     skip_ip_check: bool,
     log_file_path: String, // Log file path
+    use_venv: bool,        // Whether to use a Python virtual environment
+    venv_dir: String,      // Virtual environment directory (relative to docs/)
+    python_bin: String,    // Python executable used to create venv
+    upgrade_pip: bool,     // Whether to upgrade pip inside the venv
 }
 
 impl Default for AppConfig {
@@ -91,6 +95,16 @@ impl Default for AppConfig {
                 .unwrap_or(false),
             log_file_path: env::var("LOG_FILE_PATH")
                 .unwrap_or_else(|_| "webhook-server.log".to_string()),
+            use_venv: env::var("USE_VENV")
+                .unwrap_or_else(|_| "true".to_string())
+                .parse()
+                .unwrap_or(true),
+            venv_dir: env::var("VENV_DIR").unwrap_or_else(|_| "venv".to_string()),
+            python_bin: env::var("PYTHON_BIN").unwrap_or_else(|_| "python3".to_string()),
+            upgrade_pip: env::var("UPGRADE_PIP")
+                .unwrap_or_else(|_| "true".to_string())
+                .parse()
+                .unwrap_or(true),
         }
     }
 }
@@ -194,6 +208,14 @@ fn is_allowed_owner(
 const MAX_RETRIES: u32 = 2;
 const RETRY_DELAY_SECS: u64 = 300; // 5 minutes
 
+/// Venv-related settings forwarded to the deployment routine.
+struct VenvSettings<'a> {
+    use_venv: bool,
+    venv_dir: &'a str,
+    python_bin: &'a str,
+    upgrade_pip: bool,
+}
+
 /// Execute deployment: git clone/pull, pip install, make dist, copy dist
 /// Returns (success, attempts_made)
 async fn run_deployment(
@@ -202,6 +224,7 @@ async fn run_deployment(
     repo_full_name: &str,
     repo_name: &str,
     branch_ref: &str,
+    venv: &VenvSettings<'_>,
 ) -> Result<String, String> {
     let mut last_error: Option<String> = None;
 
@@ -219,6 +242,7 @@ async fn run_deployment(
             repo_full_name,
             repo_name,
             branch_ref,
+            venv,
         )
         .await
         {
@@ -253,6 +277,171 @@ async fn run_deployment(
     Err(last_error.unwrap_or_else(|| "Deployment failed after all retries".to_string()))
 }
 
+/// Ensure a Python virtual environment exists at `venv_path`, creating it with
+/// `python_bin -m venv` if missing. If `venv` fails because `ensurepip` is
+/// unavailable (common on Debian/Ubuntu without `python3-venv`), fall back to
+/// creating it without pip and bootstrap pip via `get-pip.py`.
+async fn ensure_venv(docs_path: &str, venv_dir: &str, python_bin: &str) -> Result<String, String> {
+    let venv_path = format!("{}/{}", docs_path.trim_end_matches('/'), venv_dir);
+    let python_in_venv = format!("{}/bin/python", venv_path);
+
+    if tokio::fs::try_exists(&python_in_venv).await.unwrap_or(false) {
+        info!("Using existing virtual environment at {}", venv_path);
+        return Ok(venv_path);
+    }
+
+    info!(
+        "Creating virtual environment at {} using {}...",
+        venv_path, python_bin
+    );
+
+    let output = Command::new(python_bin)
+        .arg("-m")
+        .arg("venv")
+        .arg(&venv_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run `{} -m venv`: {}", python_bin, e))?;
+
+    if output.status.success() {
+        return Ok(venv_path);
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    info!(
+        "`{} -m venv` failed, retrying without pip: {}",
+        python_bin, stderr
+    );
+
+    // Fallback: create venv without pip, then bootstrap pip manually.
+    let output = Command::new(python_bin)
+        .arg("-m")
+        .arg("venv")
+        .arg("--without-pip")
+        .arg(&venv_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run `{} -m venv --without-pip`: {}", python_bin, e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Failed to create virtual environment: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(venv_path)
+}
+
+/// Ensure pip is installed inside the given venv. Tries `ensurepip` first, and
+/// falls back to downloading `get-pip.py` from pypa when it's unavailable.
+/// When `upgrade` is true, pip/setuptools/wheel are upgraded after install.
+async fn ensure_pip(venv_path: &str, upgrade: bool) -> Result<(), String> {
+    let pip_bin = format!("{}/bin/pip", venv_path);
+    let python_bin = format!("{}/bin/python", venv_path);
+
+    let pip_exists = tokio::fs::try_exists(&pip_bin).await.unwrap_or(false);
+
+    if !pip_exists {
+        info!("pip not found in venv, attempting ensurepip...");
+
+        let output = Command::new(&python_bin)
+            .arg("-m")
+            .arg("ensurepip")
+            .arg("--upgrade")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run ensurepip: {}", e))?;
+
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr).to_string();
+            info!(
+                "ensurepip failed, falling back to get-pip.py: {}",
+                err.trim()
+            );
+
+            // Download get-pip.py to the venv directory and run it.
+            let get_pip_path = format!("{}/get-pip.py", venv_path);
+            info!("Downloading get-pip.py...");
+            let resp = reqwest::get("https://bootstrap.pypa.io/get-pip.py")
+                .await
+                .map_err(|e| format!("Failed to download get-pip.py: {}", e))?;
+            let bytes = resp
+                .bytes()
+                .await
+                .map_err(|e| format!("Failed to read get-pip.py body: {}", e))?;
+            tokio::fs::write(&get_pip_path, &bytes)
+                .await
+                .map_err(|e| format!("Failed to write get-pip.py: {}", e))?;
+
+            let output = Command::new(&python_bin)
+                .arg(&get_pip_path)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output()
+                .await
+                .map_err(|e| format!("Failed to run get-pip.py: {}", e))?;
+
+            // Best-effort cleanup; ignore errors.
+            let _ = tokio::fs::remove_file(&get_pip_path).await;
+
+            if !output.status.success() {
+                return Err(format!(
+                    "get-pip.py failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ));
+            }
+        }
+    }
+
+    if upgrade {
+        info!("Upgrading pip/setuptools/wheel inside venv...");
+        let output = Command::new(&python_bin)
+            .arg("-m")
+            .arg("pip")
+            .arg("install")
+            .arg("--upgrade")
+            .arg("pip")
+            .arg("setuptools")
+            .arg("wheel")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| format!("Failed to upgrade pip: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "pip upgrade failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// Build a PATH value that places the venv's bin dir ahead of the inherited PATH,
+/// so that subprocesses (make, sphinx-build, etc.) pick up venv tools first.
+fn venv_path_env(venv_path: &str) -> String {
+    let venv_bin = format!("{}/bin", venv_path.trim_end_matches('/'));
+    match env::var("PATH") {
+        Ok(existing) if !existing.is_empty() => format!("{}:{}", venv_bin, existing),
+        _ => venv_bin,
+    }
+}
+
 /// Single deployment attempt (without retry logic)
 async fn run_deployment_once(
     source_dir: &str,
@@ -260,6 +449,7 @@ async fn run_deployment_once(
     repo_full_name: &str,
     repo_name: &str,
     branch_ref: &str,
+    venv: &VenvSettings<'_>,
 ) -> Result<String, String> {
     let repo_path = format!("{}/{}", source_dir.trim_end_matches('/'), repo_name);
     let repo_url = format!("https://github.com/{}.git", repo_full_name);
@@ -393,6 +583,15 @@ async fn run_deployment_once(
         return Err(format!("docs folder not found in {}", repo_name));
     }
 
+    // Prepare virtual environment (optional) and pip
+    let venv_path_opt = if venv.use_venv {
+        let path = ensure_venv(&docs_path, venv.venv_dir, venv.python_bin).await?;
+        ensure_pip(&path, venv.upgrade_pip).await?;
+        Some(path)
+    } else {
+        None
+    };
+
     // Install pip dependencies
     info!("Installing pip dependencies for {}...", repo_name);
     let requirements_path = format!("{}/requirements.txt", docs_path);
@@ -401,7 +600,19 @@ async fn run_deployment_once(
         .unwrap_or(false);
 
     if requirements_exists {
-        let output = Command::new("pip")
+        let (pip_program, pip_first_args): (String, Vec<String>) = match &venv_path_opt {
+            Some(path) => (
+                format!("{}/bin/python", path),
+                vec!["-m".to_string(), "pip".to_string()],
+            ),
+            None => ("pip".to_string(), Vec::new()),
+        };
+
+        let mut cmd = Command::new(&pip_program);
+        for a in &pip_first_args {
+            cmd.arg(a);
+        }
+        let output = cmd
             .arg("install")
             .arg("-r")
             .arg(&requirements_path)
@@ -426,6 +637,10 @@ async fn run_deployment_once(
             repo_name
         );
     }
+
+    // Compute PATH to be used by subsequent make/find commands so the venv's
+    // bin dir (sphinx-build etc.) is picked up first when using a venv.
+    let path_env = venv_path_opt.as_deref().map(venv_path_env);
 
     // Ensure build helper scripts are executable before running make.
     info!(
@@ -466,9 +681,12 @@ async fn run_deployment_once(
 
     // Run make clean
     info!("Running make clean for {}...", repo_name);
-    let output = Command::new("make")
-        .arg("clean")
-        .current_dir(&docs_path)
+    let mut make_clean = Command::new("make");
+    make_clean.arg("clean").current_dir(&docs_path);
+    if let Some(path_env) = &path_env {
+        make_clean.env("PATH", path_env);
+    }
+    let output = make_clean
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -486,9 +704,12 @@ async fn run_deployment_once(
 
     // Run make dist
     info!("Running make dist for {}...", repo_name);
-    let output = Command::new("make")
-        .arg("dist")
-        .current_dir(&docs_path)
+    let mut make_dist = Command::new("make");
+    make_dist.arg("dist").current_dir(&docs_path);
+    if let Some(path_env) = &path_env {
+        make_dist.env("PATH", path_env);
+    }
+    let output = make_dist
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -701,12 +922,20 @@ async fn webhook(
         // Extract repo name from repo_full_name (e.g., "owner/repo" -> "repo")
         let repo_name = repo_full_name.split('/').last().unwrap_or(&repo_full_name);
 
+        let venv_settings = VenvSettings {
+            use_venv: config.use_venv,
+            venv_dir: &config.venv_dir,
+            python_bin: &config.python_bin,
+            upgrade_pip: config.upgrade_pip,
+        };
+
         let (status, message) = match run_deployment(
             &config.source_dir,
             &config.deploy_dir,
             &repo_full_name,
             repo_name,
             &branch,
+            &venv_settings,
         )
         .await
         {
@@ -811,6 +1040,10 @@ async fn main() {
     let allowed_users = state.config.allowed_users.clone();
     let skip_ip_check = state.config.skip_ip_check;
     let log_file_path = state.config.log_file_path.clone();
+    let use_venv = state.config.use_venv;
+    let venv_dir = state.config.venv_dir.clone();
+    let python_bin = state.config.python_bin.clone();
+    let upgrade_pip = state.config.upgrade_pip;
 
     // Build router
     let app = Router::new()
@@ -836,6 +1069,10 @@ async fn main() {
     info!(
         "IP check: {}",
         if skip_ip_check { "disabled" } else { "enabled" }
+    );
+    info!(
+        "Use venv: {} (dir: {}, python: {}, upgrade_pip: {})",
+        use_venv, venv_dir, python_bin, upgrade_pip
     );
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
