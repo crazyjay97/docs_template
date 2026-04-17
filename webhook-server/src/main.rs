@@ -283,11 +283,28 @@ async fn run_deployment(
 /// creating it without pip and bootstrap pip via `get-pip.py`.
 async fn ensure_venv(docs_path: &str, venv_dir: &str, python_bin: &str) -> Result<String, String> {
     let venv_path = format!("{}/{}", docs_path.trim_end_matches('/'), venv_dir);
-    let python_in_venv = format!("{}/bin/python", venv_path);
 
-    if tokio::fs::try_exists(&python_in_venv).await.unwrap_or(false) {
+    // A venv is only reusable when both `python` and `python3` symlinks resolve
+    // to real files. A previous failed `ensurepip` run can leave the dir with
+    // broken symlinks; `tokio::fs::metadata` follows symlinks so it returns
+    // an error for broken ones, which is what we want here.
+    let python_in_venv = format!("{}/bin/python", venv_path);
+    let python3_in_venv = format!("{}/bin/python3", venv_path);
+    let usable = tokio::fs::metadata(&python_in_venv).await.is_ok()
+        && tokio::fs::metadata(&python3_in_venv).await.is_ok();
+
+    if usable {
         info!("Using existing virtual environment at {}", venv_path);
         return Ok(venv_path);
+    }
+
+    // Remove any partial/broken venv so the next create call starts clean —
+    // otherwise `python3 -m venv` reuses the broken state and keeps failing.
+    if tokio::fs::try_exists(&venv_path).await.unwrap_or(false) {
+        info!("Removing incomplete venv at {} before recreating", venv_path);
+        tokio::fs::remove_dir_all(&venv_path)
+            .await
+            .map_err(|e| format!("Failed to remove incomplete venv at {}: {}", venv_path, e))?;
     }
 
     info!(
@@ -315,6 +332,13 @@ async fn ensure_venv(docs_path: &str, venv_dir: &str, python_bin: &str) -> Resul
         "`{} -m venv` failed, retrying without pip: {}",
         python_bin, stderr
     );
+
+    // The failed attempt likely left a partial venv; wipe it before the fallback.
+    if tokio::fs::try_exists(&venv_path).await.unwrap_or(false) {
+        tokio::fs::remove_dir_all(&venv_path)
+            .await
+            .map_err(|e| format!("Failed to remove failed venv at {}: {}", venv_path, e))?;
+    }
 
     // Fallback: create venv without pip, then bootstrap pip manually.
     let output = Command::new(python_bin)
