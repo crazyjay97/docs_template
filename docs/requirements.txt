@@ -1,18 +1,10 @@
-# Python dependencies for building the documentation
 # Core Sphinx
-sphinx>=4,<5
-sphinx-rtd-theme>=1,<2
+sphinx>=5,<8
+sphinx-rtd-theme>=1,<3
 sphinx-copybutton>=0.5,<1
 
 # Markdown support
-# Some package mirrors only provide MyST up to 0.16.1. Pin to the older
-# generation that is compatible with Sphinx 4.x.
-myst-parser>=0.16.1,<0.17
+myst-parser>=0.18,<2
 
 # 中文分词支持
 jieba>=0.42.0
-
-# Optional: wavedrom for drawing timing diagrams
-# Note: Requires libxcb.dylib on macOS. Install with: brew install libxcb
-# sphinxcontrib-wavedrom>=2.0.0
-# wavedrom>=2.0.0
