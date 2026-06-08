@@ -1,12 +1,13 @@
 # Webhook Server
 
-GitHub Webhook server for automated documentation deployment.
+GitHub/Gitee Webhook server for automated documentation deployment.
 
 ## Features
 
 - **Security Verification**
-  - HMAC SHA256 signature verification (WEBHOOK_SECRET)
-  - GitHub official IP range verification
+  - GitHub HMAC SHA256 signature verification (WEBHOOK_SECRET)
+  - Gitee token verification via `X-Gitee-Token` (WEBHOOK_SECRET)
+  - GitHub official IP range verification; Gitee skips this check
   - Organization/user whitelist verification
 - **Auto Deployment**: Listens to `push` events and automatically:
   - Clones or force-syncs the repository to the remote branch
@@ -43,7 +44,7 @@ Create a `.env` file or configure via systemd:
 
 ```bash
 # Required configuration
-WEBHOOK_SECRET=your_webhook_secret_here    # GitHub Webhook secret key
+WEBHOOK_SECRET=your_webhook_secret_here    # GitHub secret or Gitee WebHook password/token
 
 # Directory configuration
 SOURCE_DIR=/var/www/docs-source            # Directory to clone repositories (default: /var/www/docs-source)
@@ -161,7 +162,7 @@ sudo systemctl disable webhook-server # Disable on boot
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/webhook` | POST | GitHub Webhook receiver endpoint |
+| `/webhook` | POST | GitHub/Gitee Webhook receiver endpoint |
 | `/health` | GET | Health check |
 | `/logs` | GET | Get deployment logs |
 
@@ -170,7 +171,7 @@ sudo systemctl disable webhook-server # Disable on boot
 When a webhook is received for a `push` event to `main` or `master` branch:
 
 1. **Clone/Pull**:
-   - If repository doesn't exist: `git clone --branch <branch> https://github.com/owner/repo.git` to `SOURCE_DIR/repo`
+   - If repository doesn't exist: `git clone --branch <branch> <provider clone url>` to `SOURCE_DIR/repo`
    - If repository exists: `git fetch origin <branch>` and then `git checkout -B <branch> origin/<branch>`, `git reset --hard origin/<branch>`, `git clean -fd`
 
 2. **Find docs folder**: Look for `docs/` directory in the cloned repository
@@ -213,7 +214,7 @@ After deployment, the directory structure will be:
 
 1. **Always set WEBHOOK_SECRET**: Prevents unauthorized requests
 2. **Configure whitelist**: Restrict organizations/users that can trigger deployment
-3. **Skip IP check when behind proxy**: Set `SKIP_IP_CHECK=true` when using Nginx reverse proxy
+3. **Skip IP check when behind proxy**: Set `SKIP_IP_CHECK=true` when using Nginx reverse proxy. Gitee requests always skip the GitHub IP whitelist.
 4. **Use HTTPS**: Use reverse proxy (e.g., Nginx) with HTTPS in production
 
 ## Nginx Reverse Proxy Configuration
@@ -248,6 +249,18 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
 
         # GitHub webhook specific settings
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location /gitee/webhook {
+        proxy_pass http://127.0.0.1:5000/webhook;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
         proxy_connect_timeout 60s;
         proxy_send_timeout 60s;
         proxy_read_timeout 60s;
@@ -300,6 +313,19 @@ When using Nginx reverse proxy:
 4. Verify the webhook is working - you should see a green checkmark if successful
 
 > **Note**: The Nginx location path `/github/webhook` can be customized, just ensure it proxies to `http://127.0.0.1:5000/webhook`
+
+### 6. Gitee WebHook Configuration with Nginx
+
+When using Nginx reverse proxy:
+
+1. Go to repository **Manage** > **WebHooks** > **Add WebHook**
+
+2. Configure as follows:
+   - **Payload URL**: `https://your-domain.com/gitee/webhook`
+   - **Password/Token**: Same value as `WEBHOOK_SECRET`
+   - **Events**: Select **Push**
+
+3. Gitee requests are detected by the `X-Gitee-Event`/`X-Gitee-Token` headers and skip the GitHub IP whitelist automatically.
 
 ## Log Viewing
 

@@ -1,5 +1,5 @@
 [Unit]
-Description=GitHub Webhook Server for Auto Deployment
+Description=GitHub/Gitee Webhook Server for Auto Deployment
 After=network.target
 
 [Service]

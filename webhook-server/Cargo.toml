@@ -2,7 +2,7 @@
 name = "webhook-server"
 version = "0.1.0"
 edition = "2021"
-description = "GitHub webhook server for auto-deploying documentation"
+description = "GitHub/Gitee webhook server for auto-deploying documentation"
 
 [dependencies]
 axum = { version = "0.7", features = ["macros"] }

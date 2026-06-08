@@ -1,9 +1,10 @@
-//! GitHub Webhook Server for auto-deployment
+//! Git provider webhook server for auto-deployment
 //!
 //! Verification mechanisms:
-//! 1. HMAC SHA256 signature verification (WEBHOOK_SECRET)
-//! 2. GitHub official IP range verification
-//! 3. Organization/user whitelist verification
+//! 1. GitHub HMAC SHA256 signature verification (WEBHOOK_SECRET)
+//! 2. Gitee token verification (WEBHOOK_SECRET)
+//! 3. GitHub official IP range verification
+//! 4. Organization/user whitelist verification
 
 use axum::{
     extract::{ConnectInfo, State},
@@ -17,20 +18,36 @@ use ipnetwork::IpNetwork;
 use serde::Deserialize;
 use sha2::Sha256;
 use std::env;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::process::Stdio;
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::RwLock;
 use tokio::time::{self, Duration};
-use tracing::{error, info, Level};
+use tracing::{error, info, warn, Level};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 type HmacSha256 = Hmac<Sha256>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WebhookProvider {
+    GitHub,
+    Gitee,
+}
+
+impl WebhookProvider {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::GitHub => "GitHub",
+            Self::Gitee => "Gitee",
+        }
+    }
+}
 
 /// GitHub Webhook IP ranges (periodically updated: https://api.github.com/meta)
 const GITHUB_WEBHOOK_IPS: &[&str] = &[
@@ -120,7 +137,7 @@ struct DeploymentLog {
     repo: Option<String>,
 }
 
-/// GitHub webhook payload
+/// Git provider webhook payload
 #[derive(Deserialize, Debug)]
 struct WebhookPayload {
     #[serde(rename = "ref")]
@@ -132,12 +149,16 @@ struct WebhookPayload {
 #[derive(Deserialize, Debug)]
 struct RepositoryInfo {
     full_name: String,
+    clone_url: Option<String>,
+    git_http_url: Option<String>,
     owner: Option<OwnerInfo>,
 }
 
 #[derive(Deserialize, Debug)]
 struct OwnerInfo {
-    login: String,
+    login: Option<String>,
+    name: Option<String>,
+    path: Option<String>,
     #[serde(rename = "type")]
     owner_type: Option<String>,
 }
@@ -149,12 +170,17 @@ struct CommitInfo {
 
 #[derive(Deserialize, Debug)]
 struct Committer {
-    name: String,
+    name: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct PingPayload {
     zen: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GiteeTestPayload {
+    hook_name: Option<String>,
 }
 
 /// Verify GitHub webhook signature
@@ -173,6 +199,72 @@ fn verify_signature(payload: &[u8], signature: &str, secret: &str) -> bool {
     ConstantTimeEq::ct_eq(expected_signature.as_bytes(), signature.as_bytes()).into()
 }
 
+fn verify_token(token: &str, secret: &str) -> bool {
+    if secret.is_empty() || token.is_empty() {
+        return false;
+    }
+
+    ConstantTimeEq::ct_eq(token.as_bytes(), secret.as_bytes()).into()
+}
+
+fn detect_provider(headers: &HeaderMap) -> Option<WebhookProvider> {
+    if headers.contains_key("X-Gitee-Event") || headers.contains_key("X-Gitee-Token") {
+        return Some(WebhookProvider::Gitee);
+    }
+
+    if headers.contains_key("X-GitHub-Event") || headers.contains_key("X-Hub-Signature-256") {
+        return Some(WebhookProvider::GitHub);
+    }
+
+    None
+}
+
+fn header_value<'a>(headers: &'a HeaderMap, name: &str) -> &'a str {
+    headers
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+}
+
+fn get_client_addr(headers: &HeaderMap, fallback: SocketAddr) -> SocketAddr {
+    headers
+        .get("X-Forwarded-For")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(str::trim)
+        .and_then(|s| {
+            s.parse::<SocketAddr>().ok().or_else(|| {
+                s.parse::<IpAddr>()
+                    .ok()
+                    .map(|ip| SocketAddr::new(ip, fallback.port()))
+            })
+        })
+        .unwrap_or(fallback)
+}
+
+fn is_push_event(provider: WebhookProvider, event_type: &str) -> bool {
+    match provider {
+        WebhookProvider::GitHub => event_type == "push",
+        WebhookProvider::Gitee => {
+            event_type.eq_ignore_ascii_case("Push Hook") || event_type.eq_ignore_ascii_case("push")
+        }
+    }
+}
+
+fn repo_clone_url(
+    provider: WebhookProvider,
+    repository: Option<&RepositoryInfo>,
+    repo_full_name: &str,
+) -> String {
+    repository
+        .and_then(|r| r.clone_url.as_deref().or(r.git_http_url.as_deref()))
+        .map(str::to_string)
+        .unwrap_or_else(|| match provider {
+            WebhookProvider::GitHub => format!("https://github.com/{}.git", repo_full_name),
+            WebhookProvider::Gitee => format!("https://gitee.com/{}.git", repo_full_name),
+        })
+}
+
 /// Check if IP is from GitHub
 fn is_github_ip(addr: SocketAddr, github_ips: &[IpNetwork]) -> bool {
     let ip = addr.ip();
@@ -186,22 +278,24 @@ fn is_allowed_owner(
     allowed_orgs: &[String],
     allowed_users: &[String],
 ) -> bool {
-    // Check organization whitelist
-    if owner_type == Some("Organization") {
-        if !allowed_orgs.is_empty() {
-            return allowed_orgs.iter().any(|o| o == owner_login);
-        }
-    }
-    // Check user whitelist
-    if owner_type == Some("User") || owner_type.is_none() {
-        if !allowed_users.is_empty() {
-            return allowed_users.iter().any(|u| u == owner_login);
-        }
+    if allowed_orgs.is_empty() && allowed_users.is_empty() {
+        return true;
     }
 
-    // If the corresponding whitelist is empty, allow
-    (owner_type == Some("Organization") && allowed_orgs.is_empty())
-        || (owner_type != Some("Organization") && allowed_users.is_empty())
+    let owner_type = owner_type.unwrap_or_default();
+    let is_org_like = matches!(owner_type, "Organization" | "Group" | "Enterprise");
+    let is_user_like = owner_type.is_empty() || owner_type == "User";
+
+    if is_org_like {
+        return allowed_orgs.iter().any(|o| o == owner_login);
+    }
+
+    if is_user_like {
+        return allowed_users.iter().any(|u| u == owner_login)
+            || allowed_orgs.iter().any(|o| o == owner_login);
+    }
+
+    allowed_users.iter().any(|u| u == owner_login) || allowed_orgs.iter().any(|o| o == owner_login)
 }
 
 /// Retry configuration
@@ -221,7 +315,7 @@ struct VenvSettings<'a> {
 async fn run_deployment(
     source_dir: &str,
     deploy_dir: &str,
-    repo_full_name: &str,
+    repo_url: &str,
     repo_name: &str,
     branch_ref: &str,
     venv: &VenvSettings<'_>,
@@ -237,12 +331,7 @@ async fn run_deployment(
         );
 
         match run_deployment_once(
-            source_dir,
-            deploy_dir,
-            repo_full_name,
-            repo_name,
-            branch_ref,
-            venv,
+            source_dir, deploy_dir, repo_url, repo_name, branch_ref, venv,
         )
         .await
         {
@@ -301,7 +390,10 @@ async fn ensure_venv(docs_path: &str, venv_dir: &str, python_bin: &str) -> Resul
     // Remove any partial/broken venv so the next create call starts clean —
     // otherwise `python3 -m venv` reuses the broken state and keeps failing.
     if tokio::fs::try_exists(&venv_path).await.unwrap_or(false) {
-        info!("Removing incomplete venv at {} before recreating", venv_path);
+        info!(
+            "Removing incomplete venv at {} before recreating",
+            venv_path
+        );
         tokio::fs::remove_dir_all(&venv_path)
             .await
             .map_err(|e| format!("Failed to remove incomplete venv at {}: {}", venv_path, e))?;
@@ -351,7 +443,12 @@ async fn ensure_venv(docs_path: &str, venv_dir: &str, python_bin: &str) -> Resul
         .stderr(Stdio::piped())
         .output()
         .await
-        .map_err(|e| format!("Failed to run `{} -m venv --without-pip`: {}", python_bin, e))?;
+        .map_err(|e| {
+            format!(
+                "Failed to run `{} -m venv --without-pip`: {}",
+                python_bin, e
+            )
+        })?;
 
     if !output.status.success() {
         return Err(format!(
@@ -466,17 +563,79 @@ fn venv_path_env(venv_path: &str) -> String {
     }
 }
 
+/// Run a command while streaming stdout/stderr into the service logs.
+async fn run_logged_command(mut command: Command, label: &str) -> Result<(), String> {
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to run {}: {}", label, e))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| format!("Failed to capture {} stdout", label))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| format!("Failed to capture {} stderr", label))?;
+
+    let stdout_label = label.to_string();
+    let stdout_task = tokio::spawn(async move {
+        let mut lines = BufReader::new(stdout).lines();
+        while let Some(line) = lines
+            .next_line()
+            .await
+            .map_err(|e| format!("Failed reading {} stdout: {}", stdout_label, e))?
+        {
+            info!("[{} stdout] {}", stdout_label, line);
+        }
+        Ok::<(), String>(())
+    });
+
+    let stderr_label = label.to_string();
+    let stderr_task = tokio::spawn(async move {
+        let mut lines = BufReader::new(stderr).lines();
+        while let Some(line) = lines
+            .next_line()
+            .await
+            .map_err(|e| format!("Failed reading {} stderr: {}", stderr_label, e))?
+        {
+            warn!("[{} stderr] {}", stderr_label, line);
+        }
+        Ok::<(), String>(())
+    });
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| format!("Failed waiting for {}: {}", label, e))?;
+
+    stdout_task
+        .await
+        .map_err(|e| format!("{} stdout task failed: {}", label, e))??;
+    stderr_task
+        .await
+        .map_err(|e| format!("{} stderr task failed: {}", label, e))??;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("{} failed with status {}", label, status))
+    }
+}
+
 /// Single deployment attempt (without retry logic)
 async fn run_deployment_once(
     source_dir: &str,
     deploy_dir: &str,
-    repo_full_name: &str,
+    repo_url: &str,
     repo_name: &str,
     branch_ref: &str,
     venv: &VenvSettings<'_>,
 ) -> Result<String, String> {
     let repo_path = format!("{}/{}", source_dir.trim_end_matches('/'), repo_name);
-    let repo_url = format!("https://github.com/{}.git", repo_full_name);
     let branch_name = branch_ref.strip_prefix("refs/heads/").unwrap_or(branch_ref);
 
     // Check if repository already exists
@@ -733,20 +892,7 @@ async fn run_deployment_once(
     if let Some(path_env) = &path_env {
         make_dist.env("PATH", path_env);
     }
-    let output = make_dist
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run make dist: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "make dist failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
+    run_logged_command(make_dist, "make dist").await?;
     info!("make dist completed for {}", repo_name);
 
     // Copy dist to deploy directory
@@ -808,71 +954,99 @@ fn copy_directory(src: &str, dst: &str) -> std::io::Result<()> {
 async fn health_check() -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "status": "healthy",
-        "service": "github-webhook-server"
+        "service": "git-webhook-server"
     }))
 }
 
-/// GitHub webhook endpoint
+/// Git provider webhook endpoint
 async fn webhook(
     State(state): State<AppState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> StatusCode {
-    let signature = headers
-        .get("X-Hub-Signature-256")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
+    let provider = match detect_provider(&headers) {
+        Some(p) => p,
+        None => {
+            info!("Webhook provider could not be detected");
+            return StatusCode::BAD_REQUEST;
+        }
+    };
 
-    let event_type = headers
-        .get("X-GitHub-Event")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
+    let signature = header_value(&headers, "X-Hub-Signature-256");
+    let gitee_token = header_value(&headers, "X-Gitee-Token");
+    let event_type = match provider {
+        WebhookProvider::GitHub => header_value(&headers, "X-GitHub-Event"),
+        WebhookProvider::Gitee => header_value(&headers, "X-Gitee-Event"),
+    };
+    let delivery_id = match provider {
+        WebhookProvider::GitHub => header_value(&headers, "X-GitHub-Delivery"),
+        WebhookProvider::Gitee => header_value(&headers, "X-Gitee-Timestamp"),
+    };
+    let delivery_id = if delivery_id.is_empty() {
+        "unknown"
+    } else {
+        delivery_id
+    };
 
-    let delivery_id = headers
-        .get("X-GitHub-Delivery")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("unknown");
-
-    // Get client IP - try X-Forwarded-For first (for reverse proxy), then fall back to direct connection
-    let client_addr = headers
-        .get("X-Forwarded-For")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .and_then(|s| s.trim().parse::<SocketAddr>().ok())
-        .unwrap_or(addr);
+    // Get client IP - try X-Forwarded-For first (for reverse proxy), then fall back to direct connection.
+    let client_addr = get_client_addr(&headers, addr);
 
     info!(
-        "Received webhook event: {}, delivery: {}, from: {}",
-        event_type, delivery_id, client_addr
+        "Received {} webhook event: {}, delivery: {}, from: {}",
+        provider.as_str(),
+        event_type,
+        delivery_id,
+        client_addr
     );
 
-    // 1. IP address verification (optional skip)
-    if !state.config.skip_ip_check && !is_github_ip(client_addr, &state.github_ips) {
+    // 1. IP address verification. Gitee does not use the GitHub IP whitelist.
+    if provider == WebhookProvider::GitHub
+        && !state.config.skip_ip_check
+        && !is_github_ip(client_addr, &state.github_ips)
+    {
         info!("Webhook from non-GitHub IP: {}", client_addr);
         return StatusCode::FORBIDDEN;
     }
 
     // Handle ping event
-    if event_type == "ping" {
+    if provider == WebhookProvider::GitHub && event_type == "ping" {
         if let Ok(payload) = serde_json::from_slice::<PingPayload>(&body) {
-            info!("Ping event received: {:?}", payload.zen);
+            info!("GitHub ping event received: {:?}", payload.zen);
         }
         return StatusCode::OK;
     }
 
-    // Only handle push events
-    if event_type != "push" {
-        info!("Ignoring non-push event: {}", event_type);
+    if provider == WebhookProvider::Gitee && event_type.eq_ignore_ascii_case("Test Hook") {
+        if let Ok(payload) = serde_json::from_slice::<GiteeTestPayload>(&body) {
+            info!("Gitee test event received: {:?}", payload.hook_name);
+        }
         return StatusCode::OK;
     }
 
-    // 2. Signature verification
-    if !state.config.webhook_secret.is_empty()
-        && !verify_signature(&body, signature, &state.config.webhook_secret)
-    {
-        info!("Webhook signature verification failed");
-        return StatusCode::FORBIDDEN;
+    // Only handle push events.
+    if !is_push_event(provider, event_type) {
+        info!(
+            "Ignoring non-push {} event: {}",
+            provider.as_str(),
+            event_type
+        );
+        return StatusCode::OK;
+    }
+
+    // 2. Provider-specific secret verification.
+    if !state.config.webhook_secret.is_empty() {
+        let verified = match provider {
+            WebhookProvider::GitHub => {
+                verify_signature(&body, signature, &state.config.webhook_secret)
+            }
+            WebhookProvider::Gitee => verify_token(gitee_token, &state.config.webhook_secret),
+        };
+
+        if !verified {
+            info!("{} webhook secret verification failed", provider.as_str());
+            return StatusCode::FORBIDDEN;
+        }
     }
 
     // Parse payload
@@ -896,7 +1070,12 @@ async fn webhook(
         .repository
         .as_ref()
         .and_then(|r| r.owner.as_ref())
-        .map(|o| o.login.as_str())
+        .and_then(|o| {
+            o.login
+                .as_deref()
+                .or(o.name.as_deref())
+                .or(o.path.as_deref())
+        })
         .unwrap_or("unknown")
         .to_string();
 
@@ -910,11 +1089,18 @@ async fn webhook(
         .head_commit
         .as_ref()
         .and_then(|c| c.committer.as_ref())
-        .map(|c| c.name.as_str())
+        .and_then(|c| c.name.as_deref())
         .unwrap_or("unknown")
         .to_string();
+    let repo_url = repo_clone_url(provider, payload.repository.as_ref(), &repo_full_name);
 
-    info!("Push to {} in {} by {}", branch, repo_full_name, committer);
+    info!(
+        "{} push to {} in {} by {}",
+        provider.as_str(),
+        branch,
+        repo_full_name,
+        committer
+    );
 
     // 3. Organization/user whitelist verification
     if !is_allowed_owner(
@@ -956,7 +1142,7 @@ async fn webhook(
         let (status, message) = match run_deployment(
             &config.source_dir,
             &config.deploy_dir,
-            &repo_full_name,
+            &repo_url,
             repo_name,
             &branch,
             &venv_settings,
@@ -1109,4 +1295,68 @@ async fn main() {
     )
     .await
     .expect("Failed to start server");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gitee_push_event_is_supported() {
+        assert!(is_push_event(WebhookProvider::Gitee, "Push Hook"));
+        assert!(is_push_event(WebhookProvider::Gitee, "push"));
+        assert!(!is_push_event(WebhookProvider::Gitee, "Merge Request Hook"));
+    }
+
+    #[test]
+    fn gitee_token_uses_webhook_secret() {
+        assert!(verify_token("secret", "secret"));
+        assert!(!verify_token("wrong", "secret"));
+        assert!(!verify_token("", "secret"));
+        assert!(!verify_token("secret", ""));
+    }
+
+    #[test]
+    fn whitelist_accepts_gitee_group_like_owner() {
+        let allowed_orgs = vec!["docs-team".to_string()];
+        let allowed_users = Vec::new();
+
+        assert!(is_allowed_owner(
+            "docs-team",
+            Some("Group"),
+            &allowed_orgs,
+            &allowed_users
+        ));
+        assert!(!is_allowed_owner(
+            "other-team",
+            Some("Group"),
+            &allowed_orgs,
+            &allowed_users
+        ));
+    }
+
+    #[test]
+    fn whitelist_checks_unknown_owner_type_against_both_lists() {
+        let allowed_orgs = vec!["docs-team".to_string()];
+        let allowed_users = vec!["alice".to_string()];
+
+        assert!(is_allowed_owner(
+            "docs-team",
+            None,
+            &allowed_orgs,
+            &allowed_users
+        ));
+        assert!(is_allowed_owner(
+            "alice",
+            None,
+            &allowed_orgs,
+            &allowed_users
+        ));
+        assert!(!is_allowed_owner(
+            "bob",
+            None,
+            &allowed_orgs,
+            &allowed_users
+        ));
+    }
 }
