@@ -1,0 +1,43 @@
+# Webhook Server Configuration
+# All settings can also be set via environment variables (uppercase, with underscores).
+# Environment variables take precedence over this file.
+
+[server]
+port = 5000
+log_file_path = "webhook-server.log"
+
+# Admin panel configuration.
+# Remove or comment out this section to run in webhook-only mode.
+[admin]
+username = "admin"
+password = "admin123"
+
+# Regular user account (can sync and build, but not add/delete/publish repos).
+[user]
+username = "user"
+password = "user123"
+
+[webhook]
+secret = "your_webhook_secret_here"
+allowed_orgs = []
+allowed_users = ["your-username"]
+skip_ip_check = true
+
+[build]
+source_dir = "/var/www/docs-source"
+deploy_dir = "/var/www/docs"
+use_venv = true
+venv_dir = "venv"
+python_bin = "python3"
+upgrade_pip = true
+
+# SSH remote deployment (optional).
+# When enabled, built docs are also rsync'd to the remote server via sshpass.
+# Requires sshpass installed on the server.
+[deploy_ssh]
+enabled = false
+host = "121.199.33.189"
+port = 22
+user = "root"
+password = "your_ssh_password_here"
+remote_path = "/var/www/docs"

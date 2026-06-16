@@ -1,13 +1,14 @@
 # Webhook Server
 
-GitHub/Gitee Webhook server for automated documentation deployment.
+GitHub/Gitee/GitLab Webhook server for automated documentation deployment.
 
 ## Features
 
 - **Security Verification**
   - GitHub HMAC SHA256 signature verification (WEBHOOK_SECRET)
   - Gitee token verification via `X-Gitee-Token` (WEBHOOK_SECRET)
-  - GitHub official IP range verification; Gitee skips this check
+  - GitLab token verification via `X-Gitlab-Token` (WEBHOOK_SECRET)
+  - GitHub official IP range verification; Gitee/GitLab skip this check
   - Organization/user whitelist verification
 - **Auto Deployment**: Listens to `push` events and automatically:
   - Clones or force-syncs the repository to the remote branch
@@ -44,7 +45,7 @@ Create a `.env` file or configure via systemd:
 
 ```bash
 # Required configuration
-WEBHOOK_SECRET=your_webhook_secret_here    # GitHub secret or Gitee WebHook password/token
+WEBHOOK_SECRET=your_webhook_secret_here    # GitHub secret, Gitee WebHook password/token, or GitLab Secret token
 
 # Directory configuration
 SOURCE_DIR=/var/www/docs-source            # Directory to clone repositories (default: /var/www/docs-source)
@@ -162,7 +163,7 @@ sudo systemctl disable webhook-server # Disable on boot
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/webhook` | POST | GitHub/Gitee Webhook receiver endpoint |
+| `/webhook` | POST | GitHub/Gitee/GitLab Webhook receiver endpoint |
 | `/health` | GET | Health check |
 | `/logs` | GET | Get deployment logs |
 
@@ -214,7 +215,7 @@ After deployment, the directory structure will be:
 
 1. **Always set WEBHOOK_SECRET**: Prevents unauthorized requests
 2. **Configure whitelist**: Restrict organizations/users that can trigger deployment
-3. **Skip IP check when behind proxy**: Set `SKIP_IP_CHECK=true` when using Nginx reverse proxy. Gitee requests always skip the GitHub IP whitelist.
+3. **Skip IP check when behind proxy**: Set `SKIP_IP_CHECK=true` when using Nginx reverse proxy. Gitee/GitLab requests always skip the GitHub IP whitelist.
 4. **Use HTTPS**: Use reverse proxy (e.g., Nginx) with HTTPS in production
 
 ## Nginx Reverse Proxy Configuration
@@ -255,6 +256,18 @@ server {
     }
 
     location /gitee/webhook {
+        proxy_pass http://127.0.0.1:5000/webhook;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location /gitlab/webhook {
         proxy_pass http://127.0.0.1:5000/webhook;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -327,6 +340,20 @@ When using Nginx reverse proxy:
 
 3. Gitee requests are detected by the `X-Gitee-Event`/`X-Gitee-Token` headers and skip the GitHub IP whitelist automatically.
 
+### 7. GitLab Webhook Configuration with Nginx
+
+When using Nginx reverse proxy:
+
+1. Go to project **Settings** > **Webhooks**
+
+2. Configure as follows:
+   - **URL**: `https://your-domain.com/gitlab/webhook`
+   - **Secret token**: Same value as `WEBHOOK_SECRET`
+   - **Trigger**: Select **Push events**
+   - **SSL verification**: Keep enabled when using a valid HTTPS certificate
+
+3. GitLab requests are detected by the `X-Gitlab-Event`/`X-Gitlab-Token` headers and skip the GitHub IP whitelist automatically.
+
 ## Log Viewing
 
 ```bash
@@ -349,7 +376,7 @@ Log files are rotated daily with the naming format: `webhook-server.log.YYYY-MM-
 
 ### 1. Signature Verification Failed
 
-Ensure the Secret in GitHub Webhook configuration exactly matches `WEBHOOK_SECRET`.
+Ensure the Secret/Password/Token in the provider webhook configuration exactly matches `WEBHOOK_SECRET`.
 
 ### 2. IP Check Failed
 

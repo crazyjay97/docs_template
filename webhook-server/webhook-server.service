@@ -1,22 +1,30 @@
 [Unit]
-Description=GitHub/Gitee Webhook Server for Auto Deployment
+Description=GitHub/Gitee/GitLab Webhook Server for Auto Deployment
 After=network.target
 
 [Service]
 Type=simple
+User=root
+Group=root
 WorkingDirectory=/opt/webhook-server
 ExecStart=/opt/webhook-server/webhook-server
 Restart=on-failure
 RestartSec=5
 
-# Environment variables - Edit these!
-Environment="WEBHOOK_SECRET=your_webhook_secret_here"
-Environment="SOURCE_DIR=/var/www/docs-source"
-Environment="DEPLOY_DIR=/var/www/docs"
-Environment="PORT=5000"
-Environment="ALLOWED_ORGS=your-org"
-Environment="ALLOWED_USERS=your-username"
-Environment="SKIP_IP_CHECK=true"
+# Configuration file path (default: config.toml in WorkingDirectory)
+Environment="CONFIG_FILE=/opt/webhook-server/config.toml"
+
+# Environment variables below override config.toml values.
+# If using config.toml, you can remove these lines.
+#Environment="WEBHOOK_SECRET=your_webhook_secret_here"
+#Environment="SOURCE_DIR=/var/www/docs-source"
+#Environment="DEPLOY_DIR=/var/www/docs"
+#Environment="PORT=5000"
+#Environment="ALLOWED_ORGS=your-org"
+#Environment="ALLOWED_USERS=your-username"
+#Environment="SKIP_IP_CHECK=true"
+
+ReadWritePaths=/root/workspace/docs-source /var/www/docs
 
 [Install]
 WantedBy=multi-user.target

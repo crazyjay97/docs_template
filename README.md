@@ -7,7 +7,7 @@ A complete documentation platform based on Sphinx with multi-language support an
 This project provides:
 
 1. **Sphinx Documentation Template** - A ready-to-use template for technical documentation with internationalization (i18n) support
-2. **Webhook Server** - An automated deployment server that listens to GitHub push events and builds documentation
+2. **Webhook Server** - An automated deployment server that listens to GitHub/Gitee/GitLab push events and builds documentation
 
 ## Project Structure
 
@@ -59,7 +59,7 @@ See [webhook-server/README.md](webhook-server/README.md) for server setup and co
 ## Architecture
 
 ```
-GitHub Push Event
+Git Provider Push Event
        │
        ▼
 ┌─────────────────────┐
@@ -94,13 +94,13 @@ GitHub Push Event
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `WEBHOOK_SECRET` | - | GitHub Webhook secret (required for security) |
+| `WEBHOOK_SECRET` | - | GitHub secret, Gitee password/token, or GitLab Secret token |
 | `PORT` | 5000 | Server listen port |
 | `SOURCE_DIR` | /var/www/docs-source | Directory to clone repositories |
 | `DEPLOY_DIR` | /var/www/docs | Directory to deploy built documentation |
 | `ALLOWED_ORGS` | - | Comma-separated list of allowed organizations |
 | `ALLOWED_USERS` | - | Comma-separated list of allowed users |
-| `SKIP_IP_CHECK` | false | Skip GitHub IP verification (use behind proxy) |
+| `SKIP_IP_CHECK` | false | Skip GitHub IP verification (use behind proxy; Gitee/GitLab skip it automatically) |
 | `LOG_FILE_PATH` | webhook-server.log | Path to log file |
 
 ## License
