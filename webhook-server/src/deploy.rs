@@ -47,7 +47,7 @@ pub async fn run_deployment(
                 );
 
                 if let Some(ssh_config) = ssh {
-                    if let Err(e) = ssh_deploy(deploy_dir, repo_name, ssh_config).await {
+                    if let Err(e) = ssh_deploy(deploy_dir, repo_name, repo_name, ssh_config).await {
                         error!("SSH deployment failed for {}: {}", repo_name, e);
                         return Err(format!("Local deploy OK but SSH deploy failed: {}", e));
                     }
@@ -293,15 +293,20 @@ pub async fn build_docs(
 pub async fn ssh_deploy(
     deploy_dir: &str,
     repo_name: &str,
+    remote_name: &str,
     ssh: &ResolvedSshConfig,
 ) -> Result<String, String> {
     let local_path = format!("{}/{}/", deploy_dir.trim_end_matches('/'), repo_name);
+    let remote_dir = format!(
+        "{}/{}/",
+        ssh.remote_path.trim_end_matches('/'),
+        remote_name
+    );
     let remote_dest = format!(
-        "{}@{}:{}/{}/",
+        "{}@{}:{}",
         ssh.user,
         ssh.host,
-        ssh.remote_path.trim_end_matches('/'),
-        repo_name
+        remote_dir
     );
 
     info!("SSH deploying {} to {}...", repo_name, remote_dest);
@@ -310,6 +315,32 @@ pub async fn ssh_deploy(
         "ssh -p {} -o StrictHostKeyChecking=no",
         ssh.port
     );
+
+    // Remove remote directory first to ensure clean deploy
+    let rm_cmd = format!("rm -rf {}", remote_dir);
+    let rm_output = Command::new("sshpass")
+        .arg("-p")
+        .arg(&ssh.password)
+        .arg("ssh")
+        .arg("-p")
+        .arg(ssh.port.to_string())
+        .arg("-o")
+        .arg("StrictHostKeyChecking=no")
+        .arg(format!("{}@{}", ssh.user, ssh.host))
+        .arg(&rm_cmd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| format!("Failed to remove remote directory: {}", e))?;
+
+    if !rm_output.status.success() {
+        warn!(
+            "Remote rm failed (may not exist): {}",
+            String::from_utf8_lossy(&rm_output.stderr)
+        );
+    }
 
     let output = Command::new("sshpass")
         .arg("-p")

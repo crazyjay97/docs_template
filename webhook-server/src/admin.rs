@@ -29,6 +29,8 @@ pub struct RepoEntry {
     pub name: String,
     pub git_url: String,
     pub branch: String,
+    #[serde(default)]
+    pub deploy_name: Option<String>,
     pub added_at: String,
     pub last_sync: Option<String>,
     pub last_build: Option<String>,
@@ -42,6 +44,15 @@ pub struct AddRepoRequest {
     pub name: String,
     pub git_url: String,
     pub branch: Option<String>,
+    pub deploy_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct EditRepoRequest {
+    pub name: Option<String>,
+    pub git_url: Option<String>,
+    pub branch: Option<String>,
+    pub deploy_name: Option<String>,
 }
 
 impl AdminState {
@@ -100,9 +111,19 @@ pub async fn list_repos(
     State(state): State<AdminState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<RepoEntry>>, StatusCode> {
-    state.check_auth(&headers).await?;
+    let role = state.check_auth(&headers).await?;
     let repos = state.repos.read().await;
-    Ok(Json(repos.clone()))
+    let mut result = repos.clone();
+    if role != "admin" {
+        for r in &mut result {
+            if let Some(msg) = &r.last_message {
+                if msg.contains("SSH deployed") || msg.contains("SSH deploy") {
+                    r.last_message = Some("Published successfully".to_string());
+                }
+            }
+        }
+    }
+    Ok(Json(result))
 }
 
 pub async fn add_repo(
@@ -117,6 +138,7 @@ pub async fn add_repo(
         name: req.name,
         git_url: req.git_url,
         branch: req.branch.unwrap_or_else(|| "main".to_string()),
+        deploy_name: req.deploy_name,
         added_at: chrono::Utc::now().to_rfc3339(),
         last_sync: None,
         last_build: None,
@@ -152,6 +174,38 @@ pub async fn delete_repo(
 }
 
 /// PLACEHOLDER_ACTIONS
+
+pub async fn edit_repo(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(req): Json<EditRepoRequest>,
+) -> Result<Json<RepoEntry>, StatusCode> {
+    state.require_admin(&headers).await?;
+
+    let mut repos = state.repos.write().await;
+    let repo = repos.iter_mut().find(|r| r.id == id).ok_or(StatusCode::NOT_FOUND)?;
+
+    if let Some(name) = req.name {
+        repo.name = name;
+    }
+    if let Some(git_url) = req.git_url {
+        repo.git_url = git_url;
+    }
+    if let Some(branch) = req.branch {
+        repo.branch = branch;
+    }
+    if let Some(deploy_name) = req.deploy_name {
+        repo.deploy_name = if deploy_name.is_empty() { None } else { Some(deploy_name) };
+    }
+
+    let updated = repo.clone();
+    drop(repos);
+    state.save().await;
+
+    info!("Edited repo: {} ({})", updated.name, updated.id);
+    Ok(Json(updated))
+}
 
 pub async fn sync_repo(
     State(state): State<AdminState>,
@@ -272,7 +326,8 @@ pub async fn deploy_repo(
 
     update_status(&state, &id, "deploying").await;
 
-    let result = deploy::ssh_deploy(&state.config.deploy_dir, &repo.name, ssh_config).await;
+    let remote_name = repo.deploy_name.as_deref().unwrap_or(&repo.name);
+    let result = deploy::ssh_deploy(&state.config.deploy_dir, &repo.name, remote_name, ssh_config).await;
 
     match &result {
         Ok(msg) => {

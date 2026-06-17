@@ -5,7 +5,7 @@ mod deploy;
 mod webhook;
 
 use axum::{
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Router,
 };
 use ipnetwork::IpNetwork;
@@ -88,6 +88,7 @@ async fn main() {
             .route("/admin/repos", get(admin::list_repos))
             .route("/admin/repos", post(admin::add_repo))
             .route("/admin/repos/:id", delete(admin::delete_repo))
+            .route("/admin/repos/:id", put(admin::edit_repo))
             .route("/admin/repos/:id/sync", post(admin::sync_repo))
             .route("/admin/repos/:id/build", post(admin::build_repo))
             .route("/admin/repos/:id/deploy", post(admin::deploy_repo))

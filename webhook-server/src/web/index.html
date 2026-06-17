@@ -106,9 +106,40 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
       <label>Branch</label>
       <input type="text" id="repo-branch" placeholder="main" value="main">
     </div>
+    <div class="form-group">
+      <label>Deploy Folder Name (optional, defaults to Name)</label>
+      <input type="text" id="repo-deploy-name" placeholder="custom-folder-name">
+    </div>
     <div class="form-actions">
       <button class="btn btn-primary" onclick="doAddRepo()">Add</button>
       <button class="btn btn-outline" onclick="hideAddModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="edit-modal" class="modal-overlay">
+  <div class="glass modal">
+    <h2>Edit Repository</h2>
+    <input type="hidden" id="edit-id">
+    <div class="form-group">
+      <label>Name</label>
+      <input type="text" id="edit-name">
+    </div>
+    <div class="form-group">
+      <label>Git URL</label>
+      <input type="text" id="edit-url">
+    </div>
+    <div class="form-group">
+      <label>Branch</label>
+      <input type="text" id="edit-branch">
+    </div>
+    <div class="form-group">
+      <label>Deploy Folder Name (optional, defaults to Name)</label>
+      <input type="text" id="edit-deploy-name" placeholder="custom-folder-name">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-primary" onclick="doEditRepo()">Save</button>
+      <button class="btn btn-outline" onclick="hideEditModal()">Cancel</button>
     </div>
   </div>
 </div>
@@ -219,18 +250,20 @@ function renderRepos(repos){
     const lastBuild = r.last_build ? new Date(r.last_build).toLocaleString() : 'Never';
     const lastDeploy = r.last_deploy ? new Date(r.last_deploy).toLocaleString() : 'Never';
     const busy = r.status && r.status !== 'idle' && r.status !== 'error';
+    const deployName = r.deploy_name || r.name;
     return `<div class="glass repo-card ${statusClass}">
       <div class="card-header">
         <h3>${esc(r.name)}</h3>
         <span class="status-badge"><span class="status-dot"></span>${esc(r.status||'idle')}</span>
       </div>
-      <div class="meta">${esc(r.git_url)} @ ${esc(r.branch)}</div>
+      <div class="meta">${esc(r.git_url)} @ ${esc(r.branch)}${r.deploy_name ? ' → '+esc(r.deploy_name) : ''}</div>
       ${r.last_message?`<div class="info-row" style="margin-bottom:8px">${esc(r.last_message.substring(0,120))}</div>`:''}
       <div class="info-row">Sync: ${lastSync} | Build: ${lastBuild} | Publish: ${lastDeploy}</div>
       <div class="actions" style="margin-top:12px">
         <button class="btn btn-sm btn-outline" onclick="confirmAction('sync','${r.id}','${esc(r.name)}')" ${busy?'disabled':''}>Sync</button>
         <button class="btn btn-sm btn-outline" onclick="confirmAction('build','${r.id}','${esc(r.name)}')" ${busy?'disabled':''}>Build</button>
         ${isAdmin?`<button class="btn btn-sm btn-success" onclick="confirmAction('publish','${r.id}','${esc(r.name)}')" ${busy?'disabled':''}>Publish</button>`:''}
+        ${isAdmin?`<button class="btn btn-sm btn-warning" onclick="showEditModal('${r.id}','${esc(r.name)}','${esc(r.git_url)}','${esc(r.branch)}','${esc(r.deploy_name||'')}')">Edit</button>`:''}
         ${isAdmin?`<button class="btn btn-sm btn-danger" onclick="doDelete('${r.id}')">Delete</button>`:''}
       </div>
     </div>`;
@@ -279,10 +312,11 @@ async function doAddRepo(){
   const name = $('repo-name').value.trim();
   const git_url = $('repo-url').value.trim();
   const branch = $('repo-branch').value.trim() || 'main';
+  const deploy_name = $('repo-deploy-name').value.trim() || null;
   if(!name||!git_url){ toast('Name and URL required','error'); return; }
   try{
-    const res = await api('/admin/repos',{method:'POST',body:JSON.stringify({name,git_url,branch})});
-    if(res.ok){ toast('Repository added'); hideAddModal(); $('repo-name').value=''; $('repo-url').value=''; loadRepos(); }
+    const res = await api('/admin/repos',{method:'POST',body:JSON.stringify({name,git_url,branch,deploy_name})});
+    if(res.ok){ toast('Repository added'); hideAddModal(); $('repo-name').value=''; $('repo-url').value=''; $('repo-deploy-name').value=''; loadRepos(); }
     else toast('Failed to add','error');
   }catch(e){ toast('Error','error'); }
 }
@@ -329,6 +363,31 @@ async function doDeploy(id){
     const data = await res.json();
     toast(data.message || data.status, data.status==='ok'?'success':'error');
     loadRepos();
+  }catch(e){ toast('Error','error'); }
+}
+
+function showEditModal(id, name, git_url, branch, deploy_name){
+  $('edit-id').value = id;
+  $('edit-name').value = name;
+  $('edit-url').value = git_url;
+  $('edit-branch').value = branch;
+  $('edit-deploy-name').value = deploy_name;
+  $('edit-modal').classList.add('show');
+}
+
+function hideEditModal(){ $('edit-modal').classList.remove('show'); }
+
+async function doEditRepo(){
+  const id = $('edit-id').value;
+  const name = $('edit-name').value.trim();
+  const git_url = $('edit-url').value.trim();
+  const branch = $('edit-branch').value.trim();
+  const deploy_name = $('edit-deploy-name').value.trim();
+  if(!name||!git_url){ toast('Name and URL required','error'); return; }
+  try{
+    const res = await api('/admin/repos/'+id,{method:'PUT',body:JSON.stringify({name,git_url,branch,deploy_name})});
+    if(res.ok){ toast('Repository updated'); hideEditModal(); loadRepos(); }
+    else toast('Failed to update','error');
   }catch(e){ toast('Error','error'); }
 }
 
